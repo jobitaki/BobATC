@@ -1,0 +1,8 @@
+package BobATC;
+  typedef struct packed {
+    logic [3:0] id,
+    logic [2:0] type,
+    logic [1:0] action,
+    logic       parity
+  } msg_t
+endpackage;
