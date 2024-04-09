@@ -145,10 +145,13 @@ module ReadRequestFSM
    output logic send_clear,
    output logic send_hold,
    output logic send_say_ag,
-   output logic send_divert);
+   output logic send_divert,
+   output logic send_reply,
+   output logic lock, unlock);
 
   msg_type_t  msg_type;
   logic [1:0] msg_action;
+  logic       takeoff_first;
   
   assign msg_type   = uart_request.msg_type;
   assign msg_action = uart_request.msg_action;
@@ -208,16 +211,26 @@ module ReadRequestFSM
         end
       end
       HOLD: begin
+        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+        send_reply = 1'b1;
       end
       DIVERT: begin
+        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+        send_reply = 1'b1;
       end
       SAY_AGAIN: begin
+        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+        send_reply = 1'b1;
       end
       DECLARE: begin
+        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+        send_reply = 1'b1;
       end
       CLR_TAKEOFF: begin
+        next_state = QUIET;
       end
       CLR_LANDING: begin
+        next_state = QUIET;
       end
       default: begin
         uart_rd_request     = 1'b0;
@@ -227,15 +240,19 @@ module ReadRequestFSM
         send_hold           = 1'b0;
         send_say_ag         = 1'b0;
         send_divert         = 1'b0;
+        send_reply          = 1'b0;
       end
     endcase
   end
 
   always_ff @(posedge clock, negedge reset_n)
-    if (~reset_n) 
-      state <= LISTEN;
-    else 
-      state <= next_state;
+    if (~reset_n) begin
+      state         <= LISTEN;
+      takeoff_first <= 1'b0;
+    end else begin
+      state         <= next_state;
+      takeoff_first <= takeoff_first + 1'b1;
+    end
 
 endmodule : ReadRequestFSM
 

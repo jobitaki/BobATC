@@ -39,8 +39,15 @@ module RunwayManager
           runway[0].active <= 1'b1;
         end
       end else if (!lock && unlock) begin
-      end else if (lock && unlock) begin
-      end
+        if (runway_id) begin
+          // Prevent other planes from unlocking runway
+          if (plane_id == runway[1].plane_id)
+            runway[1].active <= 1'b0;
+        end else begin
+          if (plane_id == runway[0].plane_id)
+            runway[1].active <= 1'b1;
+        end
+     end
     end
   end
 
