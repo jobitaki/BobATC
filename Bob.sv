@@ -194,12 +194,9 @@ module ReadRequestFSM
   assign msg_type   = uart_request.msg_type;
   assign msg_action = uart_request.msg_action;
 
-  enum logic [3:0] {QUIET, 
+  enum logic [2:0] {QUIET, 
                     INTERPRET, 
-                    HOLD, 
-                    DIVERT,
-                    SAY_AGAIN, 
-                    DECLARE,
+                    REPLY, 
                     CLR_TAKEOFF,
                     CLR_LANDING} state, next_state;
 
@@ -226,23 +223,20 @@ module ReadRequestFSM
       end
       INTERPRET: begin
         if (msg_type == T_REQUEST) begin
+          next_state = REPLY;
           if (msg_action == 2'b0x) begin
             // Trying to take off, and if fifo full, just deny.
             if (takeoff_fifo_full) begin
-              next_state          = DIVERT;
               send_divert         = 1'b1;
             end else begin
-              next_state          = HOLD;
               queue_takeoff_plane = 1'b1;
               send_hold           = 1'b1;
             end 
           end else if (msg_action == 2'b1x) begin
             // Trying to land, and if fifo full, just deny.
             if (landing_fifo_full) begin
-              next_state          = DIVERT;
               send_divert         = 1'b1;
             end else begin
-              next_state          = HOLD;
               queue_landing_plane = 1'b1;
               send_hold           = 1'b1;
             end 
@@ -253,40 +247,18 @@ module ReadRequestFSM
         end else if (msg_type == T_EMERGENCY) begin
           // Lock both runways until response received
         end else if (msg_type == T_POSITION) begin
-          // Switch frequency
+          // Say Again
+          next_state  = REPLY;
+          send_say_ag = 1'b1;
         end else begin
           // Message invalid (100 and above) say again
-          next_state  = SAY_AGAIN;
+          next_state  = REPLY;
           send_say_ag = 1'b1;
         end
       end
-      HOLD: begin
+      REPLY: begin
         if (reply_fifo_full) begin
-          next_state = HOLD;
-        end else begin
-          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
-          queue_reply = 1'b1;
-        end
-      end
-      DIVERT: begin
-        if (reply_fifo_full) begin
-          next_state = HOLD;
-        end else begin
-          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
-          queue_reply = 1'b1;
-        end
-      end
-      SAY_AGAIN: begin
-        if (reply_fifo_full) begin
-          next_state = HOLD;
-        end else begin
-          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
-          queue_reply = 1'b1;
-        end
-      end
-      DECLARE: begin
-        if (reply_fifo_full) begin
-          next_state = HOLD;
+          next_state = REPLY;
         end else begin
           next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
           queue_reply = 1'b1;
@@ -297,6 +269,7 @@ module ReadRequestFSM
         if (~takeoff_fifo_empty) begin
           if (~runway_active[0]) begin
             // Place lock on runway 0
+            // TODO before coming here do read from fifo
             runway_id    = 1'b0;
             lock         = 1'b1;
             send_clear   = 2'b01;
