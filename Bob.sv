@@ -13,8 +13,10 @@ module Bob
    input  logic [8:0] uart_rx_data,   // Data from UART
    input  logic       uart_rx_valid,  // High if data is ready to be read
    output logic [8:0] uart_tx_data,   // Data to write to UART
-   output logic       uart_tx_en);    // High if ready to write to UART
-
+   input  logic       uart_tx_ready,  // High if ready to write to UART
+   output logic       uart_tx_send,   // High if data is ready for transmit
+   output logic       bob_busy);      // High if Bob has too many requests
+  
   ///////////////////////////////
   // UART Request Storage FIFO //
   ///////////////////////////////
@@ -34,7 +36,7 @@ module Bob
       uart_request.msg_type,
       uart_request.msg_action
     }),
-    .full(),
+    .full(bob_busy),
     .empty(uart_empty)
   );
 
@@ -81,13 +83,12 @@ module Bob
   /////////
 
   logic send_clear, send_hold, send_say_ag, send_divert;
-  logic send_reply;
 
   ReadRequestFSM fsm(.*);
 
-  //////////////////
-  // Reply Sender //
-  //////////////////
+  /////////////////////
+  // Reply Generator //
+  /////////////////////
 
   msg_t reply_to_send;
 
@@ -107,14 +108,15 @@ module Bob
     end else if (send_divert) begin
       reply_to_send.plane_id <= uart_request.plane_id;
       reply_to_send.msg_type <= T_DIVERT;
-    end
+    end 
   end
 
   /////////////////////////////
   // UART Reply Storage FIFO //
   /////////////////////////////
 
-  logic queue_reply;
+  logic send_reply, queue_reply;
+  logic reply_fifo_full, reply_fifo_empty;
 
   FIFO #(.WIDTH(9), .DEPTH(4)) uart_replies(
     .clock(clock),
@@ -123,8 +125,17 @@ module Bob
     .we(queue_reply),
     .re(send_reply),
     .data_out(uart_tx_data),
-    .full(),
-    .empty()
+    .full(reply_fifo_full),
+    .empty(reply_fifo_empty)
+  );
+
+  SendReplyFSM reply_fsm(
+    .clock(clock),
+    .reset_n(reset_n),
+    .uart_tx_ready(uart_tx_ready),
+    .reply_fifo_empty(reply_fifo_empty),
+    .send_reply(send_reply),
+    .uart_tx_send(uart_tx_send)
   );
 
   logic runway_id;
@@ -149,6 +160,7 @@ module ReadRequestFSM
    input  msg_t uart_request,
    input  logic takeoff_fifo_full,
    input  logic landing_fifo_full,
+   input  logic reply_fifo_full,
    output logic uart_rd_request,
    output logic queue_takeoff_plane,
    output logic queue_landing_plane,
@@ -229,20 +241,36 @@ module ReadRequestFSM
         end
       end
       HOLD: begin
-        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
-        queue_reply = 1'b1;
+        if (reply_fifo_full) begin
+          next_state = HOLD;
+        end else begin
+          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+          queue_reply = 1'b1;
+        end
       end
       DIVERT: begin
-        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
-        queue_reply = 1'b1;
+        if (reply_fifo_full) begin
+          next_state = HOLD;
+        end else begin
+          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+          queue_reply = 1'b1;
+        end
       end
       SAY_AGAIN: begin
-        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
-        queue_reply = 1'b1;
+        if (reply_fifo_full) begin
+          next_state = HOLD;
+        end else begin
+          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+          queue_reply = 1'b1;
+        end
       end
       DECLARE: begin
-        next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
-        queue_reply = 1'b1;
+        if (reply_fifo_full) begin
+          next_state = HOLD;
+        end else begin
+          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+          queue_reply = 1'b1;
+        end
       end
       CLR_TAKEOFF: begin
         next_state = QUIET;
@@ -263,6 +291,43 @@ module ReadRequestFSM
     end
 
 endmodule : ReadRequestFSM
+
+module SendReplyFSM
+  (input  logic clock, reset_n,
+   input  logic uart_tx_ready,
+   input  logic reply_fifo_empty,
+   output logic send_reply,
+   output logic uart_tx_send);
+
+  enum logic {WAIT, SEND} state, next_state;
+
+  always_comb begin
+    send_reply   = 1'b0;
+    uart_tx_send = 1'b0;
+    unique case (state)
+      WAIT: begin
+        if (reply_fifo_empty | ~uart_tx_ready) 
+          next_state = WAIT;
+        else begin
+          next_state = SEND;
+          send_reply = 1'b1;
+        end
+      end
+      SEND: begin
+        next_state   = WAIT;
+        uart_tx_send = 1'b1;
+      end
+    endcase
+  end
+
+  always_ff @(posedge clock, negedge reset_n) begin
+    if (~reset_n) 
+      state <= WAIT;
+    else 
+      state <= next_state;
+  end
+
+endmodule : SendReplyFSM
 
 //
 //  Module 'FIFO'
