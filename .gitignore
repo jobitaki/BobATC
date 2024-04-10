@@ -1,0 +1,6 @@
+simv.daidir/
+csrc/
+simv
+test/*
+!test/Bob*
+!test/testbench.mk

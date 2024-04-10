@@ -12,6 +12,8 @@ module Bob
   (input  logic       clock, reset_n,
    input  logic [8:0] uart_rx_data,   // Data from UART
    input  logic       uart_rx_valid,  // High if data is ready to be read
+   input  logic [1:0] runway_landing, // High if runway is occupied by landing
+   output logic [1:0] runway_takeoff, // High if runway is occupied by takeoff
    output logic [8:0] uart_tx_data,   // Data to write to UART
    output logic       uart_tx_en);    // High if ready to write to UART
 
@@ -23,7 +25,7 @@ module Bob
   logic uart_rd_request;
   logic uart_empty;
 
-  FIFO #(.WIDTH(9), .DEPTH(4)) uart_requests(
+  FIFO #(.WIDTH(9), .DEPTH(15)) uart_requests(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(uart_rx_data),
@@ -46,7 +48,7 @@ module Bob
   logic [3:0] cleared_takeoff_id;
   logic takeoff_fifo_full;
 
-  FIFO #(.WIDTH(4), .DEPTH(4)) takeoff_fifo(
+  FIFO #(.WIDTH(4), .DEPTH(15)) takeoff_fifo(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(uart_request.plane_id),
@@ -65,7 +67,7 @@ module Bob
   logic [3:0] cleared_landing_id;
   logic landing_fifo_full;
 
-  FIFO #(.WIDTH(4), .DEPTH(4)) landing_fifo(
+  FIFO #(.WIDTH(4), .DEPTH(15)) landing_fifo(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(uart_request.plane_id),
@@ -116,7 +118,7 @@ module Bob
 
   logic queue_reply;
 
-  FIFO #(.WIDTH(9), .DEPTH(4)) uart_replies(
+  FIFO #(.WIDTH(9), .DEPTH(15)) uart_replies(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(reply_to_send),
@@ -176,15 +178,7 @@ module ReadRequestFSM
                     CLR_LANDING} state, next_state;
 
   always_comb begin
-    uart_rd_request     = 1'b0;
-    queue_takeoff_plane = 1'b0;
-    queue_landing_plane = 1'b0;
-    send_clear          = 1'b0;
-    send_hold           = 1'b0;
-    send_say_ag         = 1'b0;
-    send_divert         = 1'b0;
-    queue_reply         = 1'b0;
-    unique case (state) 
+    case (state) 
       QUIET: begin
         if (uart_empty) 
           next_state      = QUIET;
@@ -249,6 +243,16 @@ module ReadRequestFSM
       end
       CLR_LANDING: begin
         next_state = QUIET;
+      end
+      default: begin
+        uart_rd_request     = 1'b0;
+        queue_takeoff_plane = 1'b0;
+        queue_landing_plane = 1'b0;
+        send_clear          = 1'b0;
+        send_hold           = 1'b0;
+        send_say_ag         = 1'b0;
+        send_divert         = 1'b0;
+        queue_reply         = 1'b0;
       end
     endcase
   end
