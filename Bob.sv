@@ -17,13 +17,38 @@ module Bob
    output logic       uart_tx_send,   // High if data is ready for transmit
    output logic       bob_busy);      // High if Bob has too many requests
   
-  ///////////////////////////////
-  // UART Request Storage FIFO //
-  ///////////////////////////////
-
+  // For UART Request Storage FIFO
   msg_t uart_request;
   logic uart_rd_request;
   logic uart_empty;
+
+  // For RunwayManager
+  logic runway_id;
+  logic lock, unlock;
+  logic [1:0] runway_active;
+
+  // For Aircraft Takeoff FIFO
+  logic queue_takeoff_plane, clear_takeoff_plane;
+  logic [3:0] cleared_takeoff_id;
+  logic takeoff_fifo_full, takeoff_fifo_empty;
+
+  // For Aircraft Landing FIFO
+  logic queue_landing_plane, clear_landing_plane;
+  logic [3:0] cleared_landing_id;
+  logic landing_fifo_full, landing_fifo_empty;
+
+  // For Reply Generation
+  logic send_hold, send_say_ag, send_divert;
+  logic [1:0] send_clear;
+  msg_t reply_to_send;
+
+  // For UART Reply Storage FIFO
+  logic send_reply, queue_reply;
+  logic reply_fifo_full, reply_fifo_empty;
+
+  ///////////////////////////////
+  // UART Request Storage FIFO //
+  ///////////////////////////////
 
   FIFO #(.WIDTH(9), .DEPTH(4)) uart_requests(
     .clock(clock),
@@ -44,10 +69,6 @@ module Bob
   // Aircraft Take-Off FIFO //
   ////////////////////////////
 
-  logic queue_takeoff_plane, clear_takeoff_plane;
-  logic [3:0] cleared_takeoff_id;
-  logic takeoff_fifo_full;
-
   FIFO #(.WIDTH(4), .DEPTH(4)) takeoff_fifo(
     .clock(clock),
     .reset_n(reset_n),
@@ -56,17 +77,13 @@ module Bob
     .re(clear_takeoff_plane),
     .data_out(cleared_takeoff_id),
     .full(takeoff_fifo_full),
-    .empty()
+    .empty(takeoff_fifo_empty)
   );
 
   ///////////////////////////
   // Aircraft Landing FIFO //
   ///////////////////////////
-
-  logic queue_landing_plane, clear_landing_plane;
-  logic [3:0] cleared_landing_id;
-  logic landing_fifo_full;
-
+  
   FIFO #(.WIDTH(4), .DEPTH(4)) landing_fifo(
     .clock(clock),
     .reset_n(reset_n),
@@ -75,14 +92,12 @@ module Bob
     .re(clear_landing_plane),
     .data_out(cleared_landing_id),
     .full(landing_fifo_full),
-    .empty()
+    .empty(landing_fifo_empty)
   );
 
   /////////
   // FSM //
   /////////
-
-  logic send_clear, send_hold, send_say_ag, send_divert;
 
   ReadRequestFSM fsm(.*);
 
@@ -90,15 +105,19 @@ module Bob
   // Reply Generator //
   /////////////////////
 
-  msg_t reply_to_send;
-
   always_ff @(posedge clock, negedge reset_n) begin
     if (~reset_n) begin
       reply_to_send <= 0;
-    end else if (send_clear) begin
-      reply_to_send.plane_id <= uart_request.plane_id;
-      reply_to_send.msg_type <= T_CLEAR;
-      reply_to_send.msg_action   <= 2'b00; // TODO Runway
+    end else if (send_clear[0] ^ send_clear[1]) begin
+      if (send_clear[0]) begin
+        reply_to_send.plane_id   <= cleared_takeoff_id;
+        reply_to_send.msg_type   <= T_CLEAR;
+        reply_to_send.msg_action <= {1'b0, runway_id};
+      end else if (send_clear[1]) begin
+        reply_to_send.plane_id   <= cleared_landing_id;
+        reply_to_send.msg_type   <= T_CLEAR;
+        reply_to_send.msg_action <= {1'b0, runway_id};
+      end
     end else if (send_hold) begin
       reply_to_send.plane_id <= uart_request.plane_id;
       reply_to_send.msg_type <= T_HOLD;
@@ -114,9 +133,6 @@ module Bob
   /////////////////////////////
   // UART Reply Storage FIFO //
   /////////////////////////////
-
-  logic send_reply, queue_reply;
-  logic reply_fifo_full, reply_fifo_empty;
 
   FIFO #(.WIDTH(9), .DEPTH(4)) uart_replies(
     .clock(clock),
@@ -138,10 +154,6 @@ module Bob
     .uart_tx_send(uart_tx_send)
   );
 
-  logic runway_id;
-  logic lock, unlock;
-  logic [1:0] runway_active;
-
   RunwayManager manager(
     .clock(clock),
     .reset_n(reset_n),
@@ -155,21 +167,25 @@ module Bob
 endmodule : Bob
 
 module ReadRequestFSM
-  (input  logic clock, reset_n,
-   input  logic uart_empty,
-   input  msg_t uart_request,
-   input  logic takeoff_fifo_full,
-   input  logic landing_fifo_full,
-   input  logic reply_fifo_full,
-   output logic uart_rd_request,
-   output logic queue_takeoff_plane,
-   output logic queue_landing_plane,
-   output logic send_clear,
-   output logic send_hold,
-   output logic send_say_ag,
-   output logic send_divert,
-   output logic queue_reply,
-   output logic lock, unlock);
+  (input  logic       clock, reset_n,
+   input  logic       uart_empty,
+   input  msg_t       uart_request,
+   input  logic       takeoff_fifo_full,
+   input  logic       landing_fifo_full,
+   input  logic       takeoff_fifo_empty,
+   input  logic       landing_fifo_empty,
+   input  logic       reply_fifo_full,
+   input  logic [1:0] runway_active,
+   output logic       uart_rd_request,
+   output logic       queue_takeoff_plane,
+   output logic       queue_landing_plane,
+   output logic [1:0] send_clear,
+   output logic       send_hold,
+   output logic       send_say_ag,
+   output logic       send_divert,
+   output logic       queue_reply,
+   output logic       lock, unlock,
+   output logic       runway_id);
 
   msg_type_t  msg_type;
   logic [1:0] msg_action;
@@ -191,11 +207,14 @@ module ReadRequestFSM
     uart_rd_request     = 1'b0;
     queue_takeoff_plane = 1'b0;
     queue_landing_plane = 1'b0;
-    send_clear          = 1'b0;
+    send_clear          = 2'b00;
     send_hold           = 1'b0;
     send_say_ag         = 1'b0;
     send_divert         = 1'b0;
     queue_reply         = 1'b0;
+    lock                = 1'b0;
+    unlock              = 1'b0;
+    runway_id           = 1'b0;
     unique case (state) 
       QUIET: begin
         if (uart_empty) 
@@ -230,6 +249,7 @@ module ReadRequestFSM
           end
         end else if (msg_type == T_DECLARE) begin
           // Free up runway
+          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
         end else if (msg_type == T_EMERGENCY) begin
           // Lock both runways until response received
         end else if (msg_type == T_POSITION) begin
@@ -274,21 +294,52 @@ module ReadRequestFSM
       end
       CLR_TAKEOFF: begin
         next_state = QUIET;
+        if (~takeoff_fifo_empty) begin
+          if (~runway_active[0]) begin
+            // Place lock on runway 0
+            runway_id    = 1'b0;
+            lock         = 1'b1;
+            send_clear   = 2'b01;
+          end else if (~runway_active[1]) begin
+            runway_id    = 1'b1;
+            lock         = 1'b1;
+            send_clear   = 2'b01;
+          end
+        end
       end
       CLR_LANDING: begin
         next_state = QUIET;
+        if (~landing_fifo_empty) begin
+          if (~runway_active[0]) begin
+            // Place lock on runway 0
+            runway_id    = 1'b0;
+            lock         = 1'b1;
+            send_clear   = 2'b10;
+          end else if (~runway_active[1]) begin
+            runway_id    = 1'b1;
+            lock         = 1'b1;
+            send_clear   = 2'b10;
+          end
+        end
       end
     endcase
   end
 
-  always_ff @(posedge clock, negedge reset_n)
+  always_ff @(posedge clock, negedge reset_n) begin
     if (~reset_n) begin
-      state         <= QUIET;
-      takeoff_first <= 1'b0;
+      state           <= QUIET;
+      takeoff_first   <= 1'b0;
     end else begin
-      state         <= next_state;
-      takeoff_first <= takeoff_first + 1'b1;
+      state           <= next_state;
+      if (takeoff_fifo_empty) begin
+        takeoff_first <= 1'b0;
+      end else if (landing_fifo_empty) begin
+        takeoff_first <= 1'b1; 
+      end else begin
+        takeoff_first <= ~takeoff_first;
+      end
     end
+  end
 
 endmodule : ReadRequestFSM
 
