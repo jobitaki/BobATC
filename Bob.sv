@@ -172,7 +172,7 @@ module Bob
 
   always_ff @(posedge clock, negedge reset_n) begin
     if (~reset_n) begin
-      emergency <= 1'b1;
+      emergency <= 1'b0;
     end else if (set_emergency) begin
       emergency <= 1'b1;
     end else if (unset_emergency) begin

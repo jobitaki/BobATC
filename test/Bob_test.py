@@ -22,3 +22,12 @@ async def basic_test(dut):
   dut.uart_rx_valid.value = False
   for i in range(100):
     await FallingEdge(dut.clock)
+    if dut.uart_tx_ready.value == 0b010101100: # 0101 Clear takeoff 0
+      break
+  await FallingEdge(dut.clock)
+  dut.uart_rx_data.value = 0b010100100 # 0101 Declare takeoff 0
+  dut.uart_rx_valid.value = True
+  await FallingEdge(dut.clock)
+  dut.uart_rx_valid.value = False
+  for i in range(100):
+    await FallingEdge(dut.clock)

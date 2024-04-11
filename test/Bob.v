@@ -178,7 +178,7 @@ module Bob (
 	);
 	always @(posedge clock or negedge reset_n)
 		if (~reset_n)
-			emergency <= 1'b1;
+			emergency <= 1'b0;
 		else if (set_emergency)
 			emergency <= 1'b1;
 		else if (unset_emergency)
@@ -265,16 +265,16 @@ module ReadRequestFSM (
 		set_emergency = 1'b0;
 		unset_emergency = 1'b0;
 		case (state)
-			3'd0:
+			3'b000:
 				if (uart_empty)
-					next_state = 3'd0;
+					next_state = 3'b011;
 				else begin
-					next_state = 3'd1;
+					next_state = 3'b001;
 					uart_rd_request = 1'b1;
 				end
-			3'd1:
+			3'b001:
 				if (msg_type == 3'b000) begin
-					next_state = 3'd2;
+					next_state = 3'b010;
 					if (msg_action == 2'b0x) begin
 						if (takeoff_fifo_full)
 							send_divert = 1'b1;
@@ -293,22 +293,7 @@ module ReadRequestFSM (
 					end
 				end
 				else if (msg_type == 3'b001) begin
-					if (emergency) begin
-						if (!landing_fifo_empty) begin
-							next_state = 3'd5;
-							unqueue_landing_plane = 1'b1;
-						end
-						else
-							next_state = 3'd0;
-					end
-					else if (takeoff_first) begin
-						next_state = 3'd3;
-						unqueue_takeoff_plane = 1'b1;
-					end
-					else begin
-						next_state = 3'd4;
-						unqueue_landing_plane = 1'b1;
-					end
+					next_state = 3'b011;
 					if (!msg_action[1]) begin
 						if (!msg_action[0]) begin
 							unlock = 1'b1;
@@ -333,65 +318,60 @@ module ReadRequestFSM (
 				else if (msg_type == 3'b010) begin
 					if (msg_action == 2'b01) begin
 						if (!landing_fifo_empty) begin
-							next_state = 3'd5;
+							next_state = 3'b110;
 							unqueue_landing_plane = 1'b1;
 						end
 						else
-							next_state = 3'd0;
+							next_state = 3'b000;
 						set_emergency = 1'b1;
 					end
 					else if (msg_action == 2'b00) begin
-						if (takeoff_first) begin
-							next_state = 3'd3;
-							unqueue_takeoff_plane = 1'b1;
-						end
-						else begin
-							next_state = 3'd4;
-							unqueue_landing_plane = 1'b1;
-						end
+						next_state = 3'b011;
 						unset_emergency = 1'b1;
 					end
 				end
 				else begin
-					next_state = 3'd2;
+					next_state = 3'b010;
 					send_say_ag = 1'b1;
 				end
-			3'd2:
+			3'b010:
 				if (reply_fifo_full)
-					next_state = 3'd2;
+					next_state = 3'b010;
 				else begin
-					if (emergency) begin
-						if (!landing_fifo_empty) begin
-							next_state = 3'd5;
-							unqueue_landing_plane = 1'b1;
-						end
-						else
-							next_state = 3'd0;
-					end
-					else if (!takeoff_fifo_empty && !landing_fifo_empty) begin
-						if (takeoff_first) begin
-							next_state = 3'd3;
-							unqueue_takeoff_plane = 1'b1;
-						end
-						else begin
-							next_state = 3'd4;
-							unqueue_landing_plane = 1'b1;
-						end
-					end
-					else if (!takeoff_fifo_empty) begin
-						next_state = 3'd3;
-						unqueue_takeoff_plane = 1'b1;
-					end
-					else if (!landing_fifo_empty) begin
-						next_state = 3'd4;
+					next_state = 3'b011;
+					queue_reply = 1'b1;
+				end
+			3'b011:
+				if (emergency) begin
+					if (!landing_fifo_empty) begin
+						next_state = 3'b110;
 						unqueue_landing_plane = 1'b1;
 					end
 					else
-						next_state = 3'd0;
-					queue_reply = 1'b1;
+						next_state = 3'b000;
 				end
-			3'd3: begin
-				next_state = 3'd6;
+				else if (!takeoff_fifo_empty && !landing_fifo_empty) begin
+					if (takeoff_first) begin
+						next_state = 3'b100;
+						unqueue_takeoff_plane = 1'b1;
+					end
+					else begin
+						next_state = 3'b101;
+						unqueue_landing_plane = 1'b1;
+					end
+				end
+				else if (!takeoff_fifo_empty) begin
+					next_state = 3'b100;
+					unqueue_takeoff_plane = 1'b1;
+				end
+				else if (!landing_fifo_empty) begin
+					next_state = 3'b101;
+					unqueue_landing_plane = 1'b1;
+				end
+				else
+					next_state = 3'b000;
+			3'b100: begin
+				next_state = 3'b111;
 				if (!runway_active[0]) begin
 					runway_id = 1'b0;
 					lock = 1'b1;
@@ -403,8 +383,8 @@ module ReadRequestFSM (
 					send_clear = 2'b01;
 				end
 			end
-			3'd4: begin
-				next_state = 3'd6;
+			3'b101: begin
+				next_state = 3'b111;
 				if (!runway_active[0]) begin
 					runway_id = 1'b0;
 					lock = 1'b1;
@@ -416,19 +396,19 @@ module ReadRequestFSM (
 					send_clear = 2'b10;
 				end
 			end
-			3'd5: begin
-				next_state = 3'd6;
+			3'b110: begin
+				next_state = 3'b111;
 				send_divert_landing = 1'b1;
 			end
-			3'd6: begin
-				next_state = 3'd0;
+			3'b111: begin
+				next_state = 3'b000;
 				queue_reply = 1'b1;
 			end
 		endcase
 	end
 	always @(posedge clock or negedge reset_n)
 		if (~reset_n) begin
-			state <= 3'd0;
+			state <= 3'b000;
 			takeoff_first <= 1'b0;
 		end
 		else begin
