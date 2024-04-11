@@ -545,6 +545,6 @@ module RunwayManager (
 					runway[5] <= 1'b0;
 			end
 			else if (plane_id == runway[4-:4])
-				runway[5] <= 1'b1;
+				runway[0] <= 1'b0;
 		end
 endmodule
