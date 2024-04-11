@@ -28,23 +28,26 @@ module Bob
   logic [1:0] runway_active;
 
   // For Aircraft Takeoff FIFO
-  logic queue_takeoff_plane, clear_takeoff_plane;
+  logic queue_takeoff_plane, unqueue_takeoff_plane;
   logic [3:0] cleared_takeoff_id;
   logic takeoff_fifo_full, takeoff_fifo_empty;
 
   // For Aircraft Landing FIFO
-  logic queue_landing_plane, clear_landing_plane;
+  logic queue_landing_plane, unqueue_landing_plane;
   logic [3:0] cleared_landing_id;
   logic landing_fifo_full, landing_fifo_empty;
 
   // For Reply Generation
-  logic send_hold, send_say_ag, send_divert;
+  logic send_hold, send_say_ag, send_divert, send_divert_landing;
   logic [1:0] send_clear;
   msg_t reply_to_send;
 
   // For UART Reply Storage FIFO
   logic send_reply, queue_reply;
   logic reply_fifo_full, reply_fifo_empty;
+
+  // For emergency latching
+  logic set_emergency, unset_emergency, emergency;
 
   ///////////////////////////////
   // UART Request Storage FIFO //
@@ -74,7 +77,7 @@ module Bob
     .reset_n(reset_n),
     .data_in(uart_request.plane_id),
     .we(queue_takeoff_plane),
-    .re(clear_takeoff_plane),
+    .re(unqueue_takeoff_plane),
     .data_out(cleared_takeoff_id),
     .full(takeoff_fifo_full),
     .empty(takeoff_fifo_empty)
@@ -89,7 +92,7 @@ module Bob
     .reset_n(reset_n),
     .data_in(uart_request.plane_id),
     .we(queue_landing_plane),
-    .re(clear_landing_plane),
+    .re(unqueue_landing_plane),
     .data_out(cleared_landing_id),
     .full(landing_fifo_full),
     .empty(landing_fifo_empty)
@@ -127,7 +130,10 @@ module Bob
     end else if (send_divert) begin
       reply_to_send.plane_id <= uart_request.plane_id;
       reply_to_send.msg_type <= T_DIVERT;
-    end 
+    end else if (send_divert_landing) begin
+      reply_to_send.plane_id <= cleared_landing_id;
+      reply_to_send.msg_type <= T_DIVERT;
+    end
   end
 
   /////////////////////////////
@@ -164,6 +170,16 @@ module Bob
     .runway_active(runway_active)
   );
 
+  always_ff @(posedge clock, negedge reset_n) begin
+    if (~reset_n) begin
+      emergency <= 1'b1;
+    end else if (set_emergency) begin
+      emergency <= 1'b1;
+    end else if (unset_emergency) begin
+      emergency <= 1'b0;
+    end
+  end
+
 endmodule : Bob
 
 module ReadRequestFSM
@@ -176,16 +192,22 @@ module ReadRequestFSM
    input  logic       landing_fifo_empty,
    input  logic       reply_fifo_full,
    input  logic [1:0] runway_active,
+   input  logic       emergency,
    output logic       uart_rd_request,
    output logic       queue_takeoff_plane,
    output logic       queue_landing_plane,
+   output logic       unqueue_takeoff_plane,
+   output logic       unqueue_landing_plane,
    output logic [1:0] send_clear,
    output logic       send_hold,
    output logic       send_say_ag,
    output logic       send_divert,
+   output logic       send_divert_landing,
    output logic       queue_reply,
    output logic       lock, unlock,
-   output logic       runway_id);
+   output logic       runway_id,
+   output logic       set_emergency,
+   output logic       unset_emergency);
 
   msg_type_t  msg_type;
   logic [1:0] msg_action;
@@ -198,20 +220,27 @@ module ReadRequestFSM
                     INTERPRET, 
                     REPLY, 
                     CLR_TAKEOFF,
-                    CLR_LANDING} state, next_state;
+                    CLR_LANDING,
+                    DIVERT_LANDING,
+                    QUEUE_CLR} state, next_state;
 
   always_comb begin
     uart_rd_request     = 1'b0;
     queue_takeoff_plane = 1'b0;
     queue_landing_plane = 1'b0;
+    unqueue_takeoff_plane = 1'b0;
+    unqueue_landing_plane = 1'b0;
     send_clear          = 2'b00;
     send_hold           = 1'b0;
     send_say_ag         = 1'b0;
     send_divert         = 1'b0;
+    send_divert_landing = 1'b0;
     queue_reply         = 1'b0;
     lock                = 1'b0;
     unlock              = 1'b0;
     runway_id           = 1'b0;
+    set_emergency       = 1'b0;
+    unset_emergency     = 1'b0;
     unique case (state) 
       QUIET: begin
         if (uart_empty) 
@@ -233,8 +262,8 @@ module ReadRequestFSM
               send_hold           = 1'b1;
             end 
           end else if (msg_action == 2'b1x) begin
-            // Trying to land, and if fifo full, just deny.
-            if (landing_fifo_full) begin
+            // Trying to land, and if fifo full or emergency, just deny.
+            if (landing_fifo_full || emergency) begin
               send_divert         = 1'b1;
             end else begin
               queue_landing_plane = 1'b1;
@@ -242,14 +271,67 @@ module ReadRequestFSM
             end 
           end
         end else if (msg_type == T_DECLARE) begin
-          // Free up runway
-          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+          if (emergency) begin
+            if (!landing_fifo_empty) begin
+              next_state            = DIVERT_LANDING;
+              unqueue_landing_plane = 1'b1;
+            end else
+              next_state            = QUIET;
+          end else if (takeoff_first) begin
+            next_state            = CLR_TAKEOFF;
+            unqueue_takeoff_plane = 1'b1;
+          end else begin
+            next_state            = CLR_LANDING;
+            unqueue_landing_plane = 1'b1;
+          end
+          if (!msg_action[1]) begin
+            // Declaring take off
+            if (!msg_action[0]) begin
+              // Runway 0
+              unlock    = 1'b1;
+              runway_id = 1'b0;
+            end else if (msg_action[0]) begin
+              // Runway 1
+              unlock    = 1'b1;
+              runway_id = 1'b1;
+            end
+          end else if (msg_action[1]) begin
+            // Declaring landing
+            if (!msg_action[0]) begin
+              // Runway 0
+              unlock    = 1'b1;
+              runway_id = 1'b0;
+            end else if (msg_action[0]) begin
+              // Runway 1
+              unlock    = 1'b1;
+              runway_id = 1'b1;
+            end
+          end
         end else if (msg_type == T_EMERGENCY) begin
-          // Lock both runways until response received
-        end else if (msg_type == T_POSITION) begin
-          // Say Again
-          next_state  = REPLY;
-          send_say_ag = 1'b1;
+          // Mayday shouldn't lock any runways but simply prevent
+          // clearing of landings and takeoffs. It should send out 
+          // divertions to all landings.
+          // It should still unlock runways normally.
+          // It will not send out a special message of any kind
+          if (msg_action == 2'b01) begin
+            if (!landing_fifo_empty) begin
+              next_state = DIVERT_LANDING; // Divert all landings
+              unqueue_landing_plane = 1'b1;
+            end else 
+              next_state = QUIET;
+            // Declare emergency
+            set_emergency   = 1'b1;
+          end else if (msg_action == 2'b00) begin
+            if (takeoff_first) begin
+              next_state = CLR_TAKEOFF;
+              unqueue_takeoff_plane = 1'b1;
+            end else begin
+              next_state = CLR_LANDING;
+              unqueue_landing_plane = 1'b1;
+            end
+            // Resolve emergency
+            unset_emergency = 1'b1;
+          end
         end else begin
           // Message invalid (100 and above) say again
           next_state  = REPLY;
@@ -260,40 +342,66 @@ module ReadRequestFSM
         if (reply_fifo_full) begin
           next_state = REPLY;
         end else begin
-          next_state = (takeoff_first) ? CLR_TAKEOFF : CLR_LANDING;
+          if (emergency) begin
+            if (!landing_fifo_empty) begin
+              next_state = DIVERT_LANDING;
+              unqueue_landing_plane = 1'b1;
+            end else
+              next_state = QUIET;
+          end else if (!takeoff_fifo_empty && !landing_fifo_empty) begin
+            if (takeoff_first) begin
+              next_state            = CLR_TAKEOFF;
+              unqueue_takeoff_plane = 1'b1;
+            end else begin
+              next_state            = CLR_LANDING;
+              unqueue_landing_plane = 1'b1;
+            end
+          end else if (!takeoff_fifo_empty) begin
+            next_state            = CLR_TAKEOFF;
+            unqueue_takeoff_plane = 1'b1;
+          end else if (!landing_fifo_empty) begin
+            next_state            = CLR_LANDING;
+            unqueue_landing_plane = 1'b1;
+          end else begin
+            // Nothing to clear
+            next_state = QUIET;
+          end
           queue_reply = 1'b1;
         end
       end
       CLR_TAKEOFF: begin
-        next_state = QUIET;
-        if (~takeoff_fifo_empty) begin
-          if (~runway_active[0]) begin
-            // Place lock on runway 0
-            // TODO before coming here do read from fifo
-            runway_id    = 1'b0;
-            lock         = 1'b1;
-            send_clear   = 2'b01;
-          end else if (~runway_active[1]) begin
-            runway_id    = 1'b1;
-            lock         = 1'b1;
-            send_clear   = 2'b01;
-          end
+        next_state = QUEUE_CLR;
+        if (!runway_active[0]) begin
+          // Place lock on runway 0
+          runway_id   = 1'b0;
+          lock        = 1'b1;
+          send_clear  = 2'b01;
+        end else if (!runway_active[1]) begin
+          runway_id   = 1'b1;
+          lock        = 1'b1;
+          send_clear  = 2'b01;
         end
       end
       CLR_LANDING: begin
-        next_state = QUIET;
-        if (~landing_fifo_empty) begin
-          if (~runway_active[0]) begin
-            // Place lock on runway 0
-            runway_id    = 1'b0;
-            lock         = 1'b1;
-            send_clear   = 2'b10;
-          end else if (~runway_active[1]) begin
-            runway_id    = 1'b1;
-            lock         = 1'b1;
-            send_clear   = 2'b10;
-          end
+        next_state = QUEUE_CLR;
+        if (!runway_active[0]) begin
+          // Place lock on runway 0
+          runway_id  = 1'b0;
+          lock       = 1'b1;
+          send_clear = 2'b10;
+        end else if (!runway_active[1]) begin
+          runway_id  = 1'b1;
+          lock       = 1'b1;
+          send_clear = 2'b10;
         end
+      end
+      DIVERT_LANDING: begin
+        next_state          = QUEUE_CLR;
+        send_divert_landing = 1'b1;
+      end
+      QUEUE_CLR: begin
+        next_state  = QUIET;
+        queue_reply = 1'b1;
       end
     endcase
   end
@@ -304,13 +412,7 @@ module ReadRequestFSM
       takeoff_first   <= 1'b0;
     end else begin
       state           <= next_state;
-      if (takeoff_fifo_empty) begin
-        takeoff_first <= 1'b0;
-      end else if (landing_fifo_empty) begin
-        takeoff_first <= 1'b1; 
-      end else begin
-        takeoff_first <= ~takeoff_first;
-      end
+      takeoff_first   <= ~takeoff_first;
     end
   end
 
@@ -330,7 +432,7 @@ module SendReplyFSM
     uart_tx_send = 1'b0;
     unique case (state)
       WAIT: begin
-        if (reply_fifo_empty | ~uart_tx_ready) 
+        if (reply_fifo_empty || !uart_tx_ready) 
           next_state = WAIT;
         else begin
           next_state = SEND;

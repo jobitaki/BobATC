@@ -3,11 +3,10 @@ package BobATC;
     T_REQUEST = 3'b000,
     T_DECLARE = 3'b001,
     T_EMERGENCY = 3'b010,
-    T_POSITION = 3'b011,
-    T_CLEAR = 3'b100,
-    T_HOLD = 3'b101,
-    T_SAY_AGAIN = 3'b110,
-    T_DIVERT = 3'b111
+    T_CLEAR = 3'b011,
+    T_HOLD = 3'b100,
+    T_SAY_AGAIN = 3'b101,
+    T_DIVERT = 3'b110
   } msg_type_t; 
 
   typedef struct packed {
@@ -20,4 +19,4 @@ package BobATC;
     msg_type_t  msg_type;
     logic [1:0] msg_action;
   } msg_t;
-endpackage;
+endpackage
