@@ -539,7 +539,7 @@ module RunwayManager
             runway[1].active <= 1'b0;
         end else begin
           if (plane_id == runway[0].plane_id)
-            runway[1].active <= 1'b0;
+            runway[0].active <= 1'b0;
         end
      end
     end
