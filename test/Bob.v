@@ -5,17 +5,48 @@ module Bob (
 	uart_rx_data,
 	uart_rx_valid,
 	uart_tx_data,
-	uart_tx_en
+	uart_tx_ready,
+	uart_tx_send,
+	bob_busy
 );
 	input wire clock;
 	input wire reset_n;
 	input wire [8:0] uart_rx_data;
 	input wire uart_rx_valid;
 	output wire [8:0] uart_tx_data;
-	output wire uart_tx_en;
+	input wire uart_tx_ready;
+	output wire uart_tx_send;
+	output wire bob_busy;
 	wire [8:0] uart_request;
 	wire uart_rd_request;
 	wire uart_empty;
+	wire runway_id;
+	wire lock;
+	wire unlock;
+	wire [1:0] runway_active;
+	wire queue_takeoff_plane;
+	wire unqueue_takeoff_plane;
+	wire [3:0] cleared_takeoff_id;
+	wire takeoff_fifo_full;
+	wire takeoff_fifo_empty;
+	wire queue_landing_plane;
+	wire unqueue_landing_plane;
+	wire [3:0] cleared_landing_id;
+	wire landing_fifo_full;
+	wire landing_fifo_empty;
+	wire send_hold;
+	wire send_say_ag;
+	wire send_divert;
+	wire send_divert_landing;
+	wire [1:0] send_clear;
+	reg [8:0] reply_to_send;
+	wire send_reply;
+	wire queue_reply;
+	wire reply_fifo_full;
+	wire reply_fifo_empty;
+	wire set_emergency;
+	wire unset_emergency;
+	reg emergency;
 	FIFO #(
 		.WIDTH(9),
 		.DEPTH(4)
@@ -26,13 +57,9 @@ module Bob (
 		.we(uart_rx_valid),
 		.re(uart_rd_request),
 		.data_out({uart_request[8-:4], uart_request[4-:3], uart_request[1-:2]}),
-		.full(),
+		.full(bob_busy),
 		.empty(uart_empty)
 	);
-	wire queue_takeoff_plane;
-	wire clear_takeoff_plane;
-	wire [3:0] cleared_takeoff_id;
-	wire takeoff_fifo_full;
 	FIFO #(
 		.WIDTH(4),
 		.DEPTH(4)
@@ -41,15 +68,11 @@ module Bob (
 		.reset_n(reset_n),
 		.data_in(uart_request[8-:4]),
 		.we(queue_takeoff_plane),
-		.re(clear_takeoff_plane),
+		.re(unqueue_takeoff_plane),
 		.data_out(cleared_takeoff_id),
 		.full(takeoff_fifo_full),
-		.empty()
+		.empty(takeoff_fifo_empty)
 	);
-	wire queue_landing_plane;
-	wire clear_landing_plane;
-	wire [3:0] cleared_landing_id;
-	wire landing_fifo_full;
 	FIFO #(
 		.WIDTH(4),
 		.DEPTH(4)
@@ -58,19 +81,11 @@ module Bob (
 		.reset_n(reset_n),
 		.data_in(uart_request[8-:4]),
 		.we(queue_landing_plane),
-		.re(clear_landing_plane),
+		.re(unqueue_landing_plane),
 		.data_out(cleared_landing_id),
 		.full(landing_fifo_full),
-		.empty()
+		.empty(landing_fifo_empty)
 	);
-	wire send_clear;
-	wire send_hold;
-	wire send_say_ag;
-	wire send_divert;
-	wire send_reply;
-	wire lock;
-	wire queue_reply;
-	wire unlock;
 	ReadRequestFSM fsm(
 		.clock(clock),
 		.reset_n(reset_n),
@@ -78,37 +93,58 @@ module Bob (
 		.uart_request(uart_request),
 		.takeoff_fifo_full(takeoff_fifo_full),
 		.landing_fifo_full(landing_fifo_full),
+		.takeoff_fifo_empty(takeoff_fifo_empty),
+		.landing_fifo_empty(landing_fifo_empty),
+		.reply_fifo_full(reply_fifo_full),
+		.runway_active(runway_active),
+		.emergency(emergency),
 		.uart_rd_request(uart_rd_request),
 		.queue_takeoff_plane(queue_takeoff_plane),
 		.queue_landing_plane(queue_landing_plane),
+		.unqueue_takeoff_plane(unqueue_takeoff_plane),
+		.unqueue_landing_plane(unqueue_landing_plane),
 		.send_clear(send_clear),
 		.send_hold(send_hold),
 		.send_say_ag(send_say_ag),
 		.send_divert(send_divert),
+		.send_divert_landing(send_divert_landing),
 		.queue_reply(queue_reply),
 		.lock(lock),
-		.unlock(unlock)
+		.unlock(unlock),
+		.runway_id(runway_id),
+		.set_emergency(set_emergency),
+		.unset_emergency(unset_emergency)
 	);
-	reg [8:0] reply_to_send;
 	always @(posedge clock or negedge reset_n)
 		if (~reset_n)
 			reply_to_send <= 0;
-		else if (send_clear) begin
-			reply_to_send[8-:4] <= uart_request[8-:4];
-			reply_to_send[4-:3] <= 3'b100;
-			reply_to_send[1-:2] <= 2'b00;
+		else if (send_clear[0] ^ send_clear[1]) begin
+			if (send_clear[0]) begin
+				reply_to_send[8-:4] <= cleared_takeoff_id;
+				reply_to_send[4-:3] <= 3'b011;
+				reply_to_send[1-:2] <= {1'b0, runway_id};
+			end
+			else if (send_clear[1]) begin
+				reply_to_send[8-:4] <= cleared_landing_id;
+				reply_to_send[4-:3] <= 3'b011;
+				reply_to_send[1-:2] <= {1'b0, runway_id};
+			end
 		end
 		else if (send_hold) begin
 			reply_to_send[8-:4] <= uart_request[8-:4];
-			reply_to_send[4-:3] <= 3'b101;
+			reply_to_send[4-:3] <= 3'b100;
 		end
 		else if (send_say_ag) begin
 			reply_to_send[8-:4] <= uart_request[8-:4];
-			reply_to_send[4-:3] <= 3'b110;
+			reply_to_send[4-:3] <= 3'b101;
 		end
 		else if (send_divert) begin
 			reply_to_send[8-:4] <= uart_request[8-:4];
-			reply_to_send[4-:3] <= 3'b111;
+			reply_to_send[4-:3] <= 3'b110;
+		end
+		else if (send_divert_landing) begin
+			reply_to_send[8-:4] <= cleared_landing_id;
+			reply_to_send[4-:3] <= 3'b110;
 		end
 	FIFO #(
 		.WIDTH(9),
@@ -120,11 +156,17 @@ module Bob (
 		.we(queue_reply),
 		.re(send_reply),
 		.data_out(uart_tx_data),
-		.full(),
-		.empty()
+		.full(reply_fifo_full),
+		.empty(reply_fifo_empty)
 	);
-	wire runway_id;
-	wire [1:0] runway_active;
+	SendReplyFSM reply_fsm(
+		.clock(clock),
+		.reset_n(reset_n),
+		.uart_tx_ready(uart_tx_ready),
+		.reply_fifo_empty(reply_fifo_empty),
+		.send_reply(send_reply),
+		.uart_tx_send(uart_tx_send)
+	);
 	RunwayManager manager(
 		.clock(clock),
 		.reset_n(reset_n),
@@ -134,6 +176,13 @@ module Bob (
 		.unlock(unlock),
 		.runway_active(runway_active)
 	);
+	always @(posedge clock or negedge reset_n)
+		if (~reset_n)
+			emergency <= 1'b1;
+		else if (set_emergency)
+			emergency <= 1'b1;
+		else if (unset_emergency)
+			emergency <= 1'b0;
 endmodule
 module ReadRequestFSM (
 	clock,
@@ -142,16 +191,27 @@ module ReadRequestFSM (
 	uart_request,
 	takeoff_fifo_full,
 	landing_fifo_full,
+	takeoff_fifo_empty,
+	landing_fifo_empty,
+	reply_fifo_full,
+	runway_active,
+	emergency,
 	uart_rd_request,
 	queue_takeoff_plane,
 	queue_landing_plane,
+	unqueue_takeoff_plane,
+	unqueue_landing_plane,
 	send_clear,
 	send_hold,
 	send_say_ag,
 	send_divert,
+	send_divert_landing,
 	queue_reply,
 	lock,
-	unlock
+	unlock,
+	runway_id,
+	set_emergency,
+	unset_emergency
 );
 	input wire clock;
 	input wire reset_n;
@@ -159,104 +219,261 @@ module ReadRequestFSM (
 	input wire [8:0] uart_request;
 	input wire takeoff_fifo_full;
 	input wire landing_fifo_full;
+	input wire takeoff_fifo_empty;
+	input wire landing_fifo_empty;
+	input wire reply_fifo_full;
+	input wire [1:0] runway_active;
+	input wire emergency;
 	output reg uart_rd_request;
 	output reg queue_takeoff_plane;
 	output reg queue_landing_plane;
-	output reg send_clear;
+	output reg unqueue_takeoff_plane;
+	output reg unqueue_landing_plane;
+	output reg [1:0] send_clear;
 	output reg send_hold;
 	output reg send_say_ag;
 	output reg send_divert;
+	output reg send_divert_landing;
 	output reg queue_reply;
-	output wire lock;
-	output wire unlock;
+	output reg lock;
+	output reg unlock;
+	output reg runway_id;
+	output reg set_emergency;
+	output reg unset_emergency;
 	wire [2:0] msg_type;
 	wire [1:0] msg_action;
 	reg takeoff_first;
 	assign msg_type = uart_request[4-:3];
 	assign msg_action = uart_request[1-:2];
-	reg [3:0] state;
-	reg [3:0] next_state;
+	reg [2:0] state;
+	reg [2:0] next_state;
 	always @(*) begin
 		uart_rd_request = 1'b0;
 		queue_takeoff_plane = 1'b0;
 		queue_landing_plane = 1'b0;
-		send_clear = 1'b0;
+		unqueue_takeoff_plane = 1'b0;
+		unqueue_landing_plane = 1'b0;
+		send_clear = 2'b00;
 		send_hold = 1'b0;
 		send_say_ag = 1'b0;
 		send_divert = 1'b0;
+		send_divert_landing = 1'b0;
 		queue_reply = 1'b0;
+		lock = 1'b0;
+		unlock = 1'b0;
+		runway_id = 1'b0;
+		set_emergency = 1'b0;
+		unset_emergency = 1'b0;
 		case (state)
-			4'd0:
+			3'd0:
 				if (uart_empty)
-					next_state = 4'd0;
+					next_state = 3'd0;
 				else begin
-					next_state = 4'd1;
+					next_state = 3'd1;
 					uart_rd_request = 1'b1;
 				end
-			4'd1:
+			3'd1:
 				if (msg_type == 3'b000) begin
+					next_state = 3'd2;
 					if (msg_action == 2'b0x) begin
-						if (takeoff_fifo_full) begin
-							next_state = 4'd3;
+						if (takeoff_fifo_full)
 							send_divert = 1'b1;
-						end
 						else begin
-							next_state = 4'd2;
 							queue_takeoff_plane = 1'b1;
 							send_hold = 1'b1;
 						end
 					end
 					else if (msg_action == 2'b1x) begin
-						if (landing_fifo_full) begin
-							next_state = 4'd3;
+						if (landing_fifo_full || emergency)
 							send_divert = 1'b1;
-						end
 						else begin
-							next_state = 4'd2;
 							queue_landing_plane = 1'b1;
 							send_hold = 1'b1;
 						end
 					end
 				end
-				else if (msg_type == 3'b001)
-					;
-				else if (msg_type == 3'b010)
-					;
-				else if (msg_type == 3'b011)
-					;
+				else if (msg_type == 3'b001) begin
+					if (emergency) begin
+						if (!landing_fifo_empty) begin
+							next_state = 3'd5;
+							unqueue_landing_plane = 1'b1;
+						end
+						else
+							next_state = 3'd0;
+					end
+					else if (takeoff_first) begin
+						next_state = 3'd3;
+						unqueue_takeoff_plane = 1'b1;
+					end
+					else begin
+						next_state = 3'd4;
+						unqueue_landing_plane = 1'b1;
+					end
+					if (!msg_action[1]) begin
+						if (!msg_action[0]) begin
+							unlock = 1'b1;
+							runway_id = 1'b0;
+						end
+						else if (msg_action[0]) begin
+							unlock = 1'b1;
+							runway_id = 1'b1;
+						end
+					end
+					else if (msg_action[1]) begin
+						if (!msg_action[0]) begin
+							unlock = 1'b1;
+							runway_id = 1'b0;
+						end
+						else if (msg_action[0]) begin
+							unlock = 1'b1;
+							runway_id = 1'b1;
+						end
+					end
+				end
+				else if (msg_type == 3'b010) begin
+					if (msg_action == 2'b01) begin
+						if (!landing_fifo_empty) begin
+							next_state = 3'd5;
+							unqueue_landing_plane = 1'b1;
+						end
+						else
+							next_state = 3'd0;
+						set_emergency = 1'b1;
+					end
+					else if (msg_action == 2'b00) begin
+						if (takeoff_first) begin
+							next_state = 3'd3;
+							unqueue_takeoff_plane = 1'b1;
+						end
+						else begin
+							next_state = 3'd4;
+							unqueue_landing_plane = 1'b1;
+						end
+						unset_emergency = 1'b1;
+					end
+				end
 				else begin
-					next_state = 4'd4;
+					next_state = 3'd2;
 					send_say_ag = 1'b1;
 				end
-			4'd2: begin
-				next_state = (takeoff_first ? 4'd6 : 4'd7);
+			3'd2:
+				if (reply_fifo_full)
+					next_state = 3'd2;
+				else begin
+					if (emergency) begin
+						if (!landing_fifo_empty) begin
+							next_state = 3'd5;
+							unqueue_landing_plane = 1'b1;
+						end
+						else
+							next_state = 3'd0;
+					end
+					else if (!takeoff_fifo_empty && !landing_fifo_empty) begin
+						if (takeoff_first) begin
+							next_state = 3'd3;
+							unqueue_takeoff_plane = 1'b1;
+						end
+						else begin
+							next_state = 3'd4;
+							unqueue_landing_plane = 1'b1;
+						end
+					end
+					else if (!takeoff_fifo_empty) begin
+						next_state = 3'd3;
+						unqueue_takeoff_plane = 1'b1;
+					end
+					else if (!landing_fifo_empty) begin
+						next_state = 3'd4;
+						unqueue_landing_plane = 1'b1;
+					end
+					else
+						next_state = 3'd0;
+					queue_reply = 1'b1;
+				end
+			3'd3: begin
+				next_state = 3'd6;
+				if (!runway_active[0]) begin
+					runway_id = 1'b0;
+					lock = 1'b1;
+					send_clear = 2'b01;
+				end
+				else if (!runway_active[1]) begin
+					runway_id = 1'b1;
+					lock = 1'b1;
+					send_clear = 2'b01;
+				end
+			end
+			3'd4: begin
+				next_state = 3'd6;
+				if (!runway_active[0]) begin
+					runway_id = 1'b0;
+					lock = 1'b1;
+					send_clear = 2'b10;
+				end
+				else if (!runway_active[1]) begin
+					runway_id = 1'b1;
+					lock = 1'b1;
+					send_clear = 2'b10;
+				end
+			end
+			3'd5: begin
+				next_state = 3'd6;
+				send_divert_landing = 1'b1;
+			end
+			3'd6: begin
+				next_state = 3'd0;
 				queue_reply = 1'b1;
 			end
-			4'd3: begin
-				next_state = (takeoff_first ? 4'd6 : 4'd7);
-				queue_reply = 1'b1;
-			end
-			4'd4: begin
-				next_state = (takeoff_first ? 4'd6 : 4'd7);
-				queue_reply = 1'b1;
-			end
-			4'd5: begin
-				next_state = (takeoff_first ? 4'd6 : 4'd7);
-				queue_reply = 1'b1;
-			end
-			4'd6: next_state = 4'd0;
-			4'd7: next_state = 4'd0;
 		endcase
 	end
 	always @(posedge clock or negedge reset_n)
 		if (~reset_n) begin
-			state <= 4'd0;
+			state <= 3'd0;
 			takeoff_first <= 1'b0;
 		end
 		else begin
 			state <= next_state;
-			takeoff_first <= takeoff_first + 1'b1;
+			takeoff_first <= ~takeoff_first;
 		end
+endmodule
+module SendReplyFSM (
+	clock,
+	reset_n,
+	uart_tx_ready,
+	reply_fifo_empty,
+	send_reply,
+	uart_tx_send
+);
+	input wire clock;
+	input wire reset_n;
+	input wire uart_tx_ready;
+	input wire reply_fifo_empty;
+	output reg send_reply;
+	output reg uart_tx_send;
+	reg state;
+	reg next_state;
+	always @(*) begin
+		send_reply = 1'b0;
+		uart_tx_send = 1'b0;
+		case (state)
+			1'd0:
+				if (reply_fifo_empty || !uart_tx_ready)
+					next_state = 1'd0;
+				else begin
+					next_state = 1'd1;
+					send_reply = 1'b1;
+				end
+			1'd1: begin
+				next_state = 1'd0;
+				uart_tx_send = 1'b1;
+			end
+		endcase
+	end
+	always @(posedge clock or negedge reset_n)
+		if (~reset_n)
+			state <= 1'd0;
+		else
+			state <= next_state;
 endmodule
 module FIFO (
 	clock,

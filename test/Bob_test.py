@@ -17,6 +17,7 @@ async def basic_test(dut):
 
   dut.uart_rx_data.value = 0b010100000 # Aircraft 0101 is requesting takeoff
   dut.uart_rx_valid.value = True
+  dut.uart_tx_ready.value = True
   await FallingEdge(dut.clock)
   dut.uart_rx_valid.value = False
   for i in range(100):
