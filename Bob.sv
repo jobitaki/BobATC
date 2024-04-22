@@ -8,14 +8,15 @@
 
 import BobATC::*;
 
-module Bob
-  (input  logic       clock, reset_n,
-   input  logic [8:0] uart_rx_data,   // Data from UART
-   input  logic       uart_rx_valid,  // High if data is ready to be read
-   output logic [8:0] uart_tx_data,   // Data to write to UART
-   input  logic       uart_tx_ready,  // High if ready to write to UART
-   output logic       uart_tx_send,   // High if data is ready for transmit
-   output logic       bob_busy);      // High if Bob has too many requests
+module Bob(
+  input  logic       clock, reset_n,
+  input  logic [8:0] uart_rx_data,   // Data from UART
+  input  logic       uart_rx_valid,  // High if data is ready to be read
+  output logic [8:0] uart_tx_data,   // Data to write to UART
+  input  logic       uart_tx_ready,  // High if ready to write to UART
+  output logic       uart_tx_send,   // High if data is ready for transmit
+  output logic       bob_busy        // High if Bob has too many requests
+);      
   
   // For UART Request Storage FIFO
   msg_t uart_request;
@@ -53,7 +54,10 @@ module Bob
   // UART Request Storage FIFO //
   ///////////////////////////////
 
-  FIFO #(.WIDTH(9), .DEPTH(4)) uart_requests(
+  FIFO #(
+    .WIDTH(9), 
+    .DEPTH(4)
+  ) uart_requests(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(uart_rx_data),

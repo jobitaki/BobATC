@@ -1,25 +1,31 @@
-// A basic implementation of 8N1 UART protocol
-// 8 data bits, no parity bit, 1 stop bit
+// A basic implementation of 9N1 UART protocol
+// 9 data bits, no parity bit, 1 stop bit
 
-module uart_tb
-  (input logic clock, reset_n);
+module uart_tb();
+  logic       clock, reset_n;
+  logic       send;           // High to send data
+  logic [8:0] data;           // Data to send
+  logic       tx;             // Serial data output line
+  logic       ready;
 
-  baud_rate_generator #(
-    .CLK_HZ(25_000_000), 
-    .BAUD_RATE(9600),
-    .SAMPLE_RATE(16)
-  ) brg(
-    .clock(clock),
-    .reset_n(reset_n),
-    .tick()
-  );
+  uart_tx dut(.*);
 
-endmodule : uart_top
+  initial begin
+    clock = 0;
+    forever #1 clock = ~clock;
+  end
 
-module uart_rx
-  ();
-endmodule : uart_rx
+  initial begin
+    data = 9'b1010_1010_1;
+    
+    reset_n <= 1'b0;
+    @(posedge clock);
+    reset_n <= 1'b1;
+    send <= 1'b1;
+    @(posedge clock);
+    send <= 1'b0;
+    for (int i = 0; i < 5000; i++)
+      @(posedge clock);
+  end
 
-module uart_tx
-  ();
-endmodule : uart_tx
+endmodule : uart_tb
