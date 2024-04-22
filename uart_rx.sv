@@ -52,7 +52,8 @@ module uart_rx(
     .start(start),
     .collect_data(collect_data),
     .en_data_counter(en_data_counter),
-    .framing_error(framing_error)
+    .framing_error(framing_error),
+    .done(done)
   );
 
 endmodule : uart_rx
@@ -65,7 +66,8 @@ module uart_rx_fsm(
   output logic start,
   output logic collect_data,
   output logic en_data_counter,
-  output logic framing_error
+  output logic framing_error,
+  output logic done
 );
 
   enum logic [1:0] {
@@ -80,6 +82,7 @@ module uart_rx_fsm(
     collect_data    = 1'b0;
     en_data_counter = 1'b0;
     framing_error   = 1'b0;
+    done            = 1'b0;
 
     case (state)
       IDLE: begin
@@ -108,8 +111,10 @@ module uart_rx_fsm(
           if (!rx) begin // Should be stop bit, but we got logic low
             next_state    = FRAMING_ERROR;
             framing_error = 1'b1;
-          end else
+          end else begin
             next_state = IDLE;
+            done       = 1'b1;
+          end
         end
       end
 

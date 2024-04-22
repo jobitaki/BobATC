@@ -26,6 +26,7 @@ module uart_tb();
     send <= 1'b0;
     for (int i = 0; i < 5000; i++)
       @(posedge clock);
+    $finish;
   end
 
 endmodule : uart_tb

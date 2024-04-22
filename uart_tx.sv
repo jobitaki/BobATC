@@ -72,6 +72,7 @@ module uart_tx(
     .reset_n(reset_n),
     .send(send),
     .tick(tick),
+    .done_data(done_data),
     .start(start),
     .send_start_bit(send_start_bit),
     .send_data(send_data),
@@ -149,5 +150,11 @@ module uart_tx_fsm(
       end
     endcase
   end
+
+  always_ff @(posedge clock, negedge reset_n)
+    if (!reset_n)
+      state <= IDLE;
+    else
+      state <= next_state;
 
 endmodule : uart_tx_fsm
