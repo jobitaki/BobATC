@@ -25,11 +25,12 @@ module uart_tx(
   logic       en_data_counter;
   logic [3:0] data_counter;
   logic       done_data;
+  logic       clear_data_counter;
 
   assign done_data = data_counter == 4'd9;
 
   always_ff @(posedge clock, negedge reset_n) 
-    if (!reset_n) 
+    if (!reset_n || clear_data_counter) 
       data_counter <= '0;
     else if (en_data_counter && tick)
       data_counter <= data_counter + 1;
@@ -78,6 +79,7 @@ module uart_tx(
     .send_data(send_data),
     .send_stop_bit(send_stop_bit),
     .en_data_counter(en_data_counter),
+    .clear_data_counter(clear_data_counter),
     .ready(ready)
   );
   
@@ -93,18 +95,20 @@ module uart_tx_fsm(
   output logic send_data,
   output logic send_stop_bit,
   output logic en_data_counter,
+  output logic clear_data_counter,
   output logic ready
 );
 
   enum logic [1:0] {IDLE, START, SEND, STOP} state, next_state;
 
   always_comb begin
-    start           = 1'b0;
-    send_start_bit  = 1'b0;
-    send_data       = 1'b0;
-    send_stop_bit   = 1'b0;
-    en_data_counter = 1'b0;
-    ready           = 1'b0;
+    start              = 1'b0;
+    send_start_bit     = 1'b0;
+    send_data          = 1'b0;
+    send_stop_bit      = 1'b0;
+    en_data_counter    = 1'b0;
+    clear_data_counter = 1'b0;
+    ready              = 1'b0;
 
     case (state)
       IDLE: begin
@@ -131,8 +135,9 @@ module uart_tx_fsm(
 
       SEND: begin
         if (tick && done_data) begin
-          next_state    = STOP;
-          send_stop_bit = 1'b1;
+          next_state         = STOP;
+          send_stop_bit      = 1'b1;
+          clear_data_counter = 1'b1;
         end else begin
           next_state      = SEND;
           send_data       = 1'b1;

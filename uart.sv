@@ -16,7 +16,7 @@ module uart_tb();
   end
 
   initial begin
-    data = 9'b1010_1011_0;
+    data = 9'b0110_1010_1;
     
     reset_n <= 1'b0;
     @(posedge clock);
@@ -27,6 +27,9 @@ module uart_tb();
     @(posedge clock);
     send <= 1'b1;
     @(posedge clock);
+    for (int i = 0; i < 5000; i++)
+      @(posedge clock);
+    send <= 1'b0;
     for (int i = 0; i < 5000; i++)
       @(posedge clock);
     $finish;
