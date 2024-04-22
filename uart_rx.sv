@@ -1,10 +1,10 @@
 `default_nettype none
 
 module uart_rx(
-  input logic        clock, reset_n, 
-  input logic        rx,             // Serial data input line
-  output logic [8:0] data,           // Data received
-  output logic       done,           // High if data is fully received
+  input  logic       clock, reset_n, 
+  input  logic       rx,             // Serial data input line
+  output logic [8:0] data,            // Data received
+  output logic       done,            // High if data is fully received
   output logic       framing_error
 );      
 
@@ -24,21 +24,22 @@ module uart_rx(
 
   logic       collect_data;
   logic       en_data_counter;
+  logic       clear_data_counter;
   logic [3:0] data_counter;
   logic       done_data;
 
   always_ff @(posedge clock, negedge reset_n)
-    if (~reset_n) 
+    if (!reset_n) 
       data <= '0;
     else if (collect_data && tick) begin
-      data[0] <= rx;
-      data    <= data << 1;
+      data    <= data >> 1;
+      data[8] <= rx;
     end
 
   assign done_data = data_counter == 4'd9;
 
   always_ff @(posedge clock, negedge reset_n)
-    if (!reset_n)
+    if (!reset_n || clear_data_counter)
       data_counter <= '0;
     else if (en_data_counter && tick) 
       data_counter <= data_counter + 1'b1;
@@ -52,6 +53,7 @@ module uart_rx(
     .start(start),
     .collect_data(collect_data),
     .en_data_counter(en_data_counter),
+    .clear_data_counter(clear_data_counter),
     .framing_error(framing_error),
     .done(done)
   );
@@ -66,6 +68,7 @@ module uart_rx_fsm(
   output logic start,
   output logic collect_data,
   output logic en_data_counter,
+  output logic clear_data_counter,
   output logic framing_error,
   output logic done
 );
@@ -78,11 +81,12 @@ module uart_rx_fsm(
   } state, next_state;
 
   always_comb begin
-    start           = 1'b0;
-    collect_data    = 1'b0;
-    en_data_counter = 1'b0;
-    framing_error   = 1'b0;
-    done            = 1'b0;
+    start              = 1'b0;
+    collect_data       = 1'b0;
+    en_data_counter    = 1'b0;
+    clear_data_counter = 1'b0;
+    framing_error      = 1'b0;
+    done               = 1'b0;
 
     case (state)
       IDLE: begin
@@ -112,16 +116,18 @@ module uart_rx_fsm(
             next_state    = FRAMING_ERROR;
             framing_error = 1'b1;
           end else begin
-            next_state = IDLE;
-            done       = 1'b1;
+            next_state         = IDLE;
+            clear_data_counter = 1'b1;
+            done               = 1'b1;
           end
         end
       end
 
       FRAMING_ERROR: begin
-        if (tick && rx)
-          next_state = IDLE;
-        else if (tick && !rx) begin
+        if (tick && rx) begin
+          next_state         = IDLE;
+          clear_data_counter = 1'b1;
+        end else if (tick && !rx) begin
           next_state    = FRAMING_ERROR;
           framing_error = 1'b1;
         end
@@ -136,15 +142,3 @@ module uart_rx_fsm(
       state <= next_state;
 
 endmodule : uart_rx_fsm
-
-module uart_rx_tb();
-  logic       clock, reset_n, 
-  logic       tick,     
-  logic       rx,             // Serial data input line
-  logic [8:0] data,           // Data received
-  logic       done,           // High if data is fully received
-  logic       framing_error
-
-  uart_rx dut(.*);
-
-endmodule : uart_rx_tb
