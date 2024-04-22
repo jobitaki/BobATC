@@ -41,7 +41,7 @@ module uart_tx(
   always_ff @(posedge clock, negedge reset_n) 
     if (!reset_n)
       saved_data <= '0;
-    else if (send)
+    else if (start)
       saved_data <= data;
     else if (send_data && tick)
       saved_data <= saved_data >> 1; // LSB first
@@ -99,11 +99,12 @@ module uart_tx_fsm(
   enum logic [1:0] {IDLE, START, SEND, STOP} state, next_state;
 
   always_comb begin
-    start          = 1'b0;
-    send_start_bit = 1'b0;
-    send_data      = 1'b0;
-    send_stop_bit  = 1'b0;
-    ready          = 1'b0;
+    start           = 1'b0;
+    send_start_bit  = 1'b0;
+    send_data       = 1'b0;
+    send_stop_bit   = 1'b0;
+    en_data_counter = 1'b0;
+    ready           = 1'b0;
 
     case (state)
       IDLE: begin
@@ -132,7 +133,6 @@ module uart_tx_fsm(
         if (tick && done_data) begin
           next_state    = STOP;
           send_stop_bit = 1'b1;
-          ready         = 1'b1;
         end else begin
           next_state      = SEND;
           send_data       = 1'b1;
@@ -141,9 +141,10 @@ module uart_tx_fsm(
       end
 
       STOP: begin
-        if (tick)
+        if (tick) begin
           next_state = IDLE;
-        else begin
+          ready      = 1'b1;
+        end else begin
           next_state    = STOP;
           send_stop_bit = 1'b1;
         end
