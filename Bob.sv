@@ -44,7 +44,7 @@ module BobTop(
     .reset_n(~reset),
     .uart_rx_data(uart_rx_data),
     .uart_rx_valid(uart_rx_valid),
-    .uart_rx_data(uart_rx_data),
+    .uart_tx_data(uart_tx_data),
     .uart_tx_ready(uart_tx_ready),
     .uart_tx_send(uart_tx_send),
     .bob_busy(io_out[9]),
