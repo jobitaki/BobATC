@@ -28,7 +28,7 @@ module uart_rx(
   logic [3:0] data_counter;
   logic       done_data;
 
-  always_ff @(posedge clock, posedge reset)
+  always_ff @(posedge clock)
     if (reset) 
       data <= '0;
     else if (collect_data && tick) begin
@@ -38,7 +38,7 @@ module uart_rx(
 
   assign done_data = data_counter == 4'd9;
 
-  always_ff @(posedge clock, posedge reset)
+  always_ff @(posedge clock)
     if (reset || clear_data_counter)
       data_counter <= '0;
     else if (en_data_counter && tick) 
@@ -135,7 +135,7 @@ module uart_rx_fsm(
     endcase
   end
 
-  always_ff @(posedge clock, posedge reset)
+  always_ff @(posedge clock)
     if (reset) 
       state <= IDLE;
     else

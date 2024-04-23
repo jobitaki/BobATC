@@ -163,7 +163,7 @@ module Bob(
   // Reply Generator //
   /////////////////////
 
-  always_ff @(posedge clock, posedge reset) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       reply_to_send <= 0;
     end else if (send_clear[0] ^ send_clear[1]) begin
@@ -228,7 +228,7 @@ module Bob(
     .runway_active(runway_active)
   );
 
-  always_ff @(posedge clock, posedge reset) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       emergency <= 1'b0;
     end else if (set_emergency) begin
@@ -457,7 +457,7 @@ module ReadRequestFSM
     endcase
   end
 
-  always_ff @(posedge clock, posedge reset) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       state           <= QUIET;
       takeoff_first   <= 1'b0;
@@ -497,7 +497,7 @@ module SendReplyFSM
     endcase
   end
 
-  always_ff @(posedge clock, posedge reset) begin
+  always_ff @(posedge clock) begin
     if (reset) 
       state <= WAIT;
     else 
@@ -534,7 +534,7 @@ module FIFO
   assign empty = (count == 0);
   assign full  = (count == DEPTH);
 
-  always_ff @(posedge clock, posedge reset) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       count   <= 0;
       get_ptr <= 0;
@@ -584,7 +584,7 @@ module RunwayManager
   assign runway_active[0] = runway[0].active;
   assign runway_active[1] = runway[1].active;
 
-  always_ff @(posedge clock, posedge reset) begin
+  always_ff @(posedge clock) begin
     if (reset) begin
       runway[0].active <= 0;
       runway[1].active <= 0;

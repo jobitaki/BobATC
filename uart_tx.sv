@@ -29,7 +29,7 @@ module uart_tx(
 
   assign done_data = data_counter == 4'd9;
 
-  always_ff @(posedge clock, posedge reset) 
+  always_ff @(posedge clock) 
     if (reset || clear_data_counter) 
       data_counter <= '0;
     else if (en_data_counter && tick)
@@ -39,7 +39,7 @@ module uart_tx(
   logic       data_bit;
   logic       send_data;
 
-  always_ff @(posedge clock, posedge reset) 
+  always_ff @(posedge clock) 
     if (reset)
       saved_data <= '0;
     else if (start)
@@ -47,7 +47,7 @@ module uart_tx(
     else if (send_data && tick)
       saved_data <= saved_data >> 1; // LSB first
 
-  always_ff @(posedge clock, posedge reset)
+  always_ff @(posedge clock)
     if (reset) 
       data_bit <= 1'b0;
     else if (send_data && tick) 
@@ -56,7 +56,7 @@ module uart_tx(
   logic send_start_bit;
   logic send_stop_bit;
 
-  always_ff @(posedge clock, posedge reset)
+  always_ff @(posedge clock)
     if (reset) 
       tx <= 1'b1;
     else if (send_start_bit) 
@@ -157,7 +157,7 @@ module uart_tx_fsm(
     endcase
   end
 
-  always_ff @(posedge clock, posedge reset)
+  always_ff @(posedge clock)
     if (reset)
       state <= IDLE;
     else

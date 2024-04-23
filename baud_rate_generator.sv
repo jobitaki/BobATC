@@ -15,7 +15,7 @@ module baud_rate_generator
 
   assign tick = clockCount == DIVISOR;
 
-  always_ff @(posedge clock, posedge reset)
+  always_ff @(posedge clock)
     if (reset | tick)
       clockCount <= '0;
     else if (start_rx)
