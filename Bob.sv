@@ -8,14 +8,60 @@
 
 import BobATC::*;
 
+module BobTop(
+  input  logic        clock, reset,
+  input  logic [11:0] io_in,
+  output logic [11:0] io_out
+);
+
+  assign io_out[6:0] = '0;
+
+  logic [8:0] uart_rx_data, uart_tx_data;
+  logic       uart_rx_valid;
+  logic       uart_tx_ready;
+  logic       uart_tx_send;
+
+  uart_rx receiver(
+    .clock(clock),
+    .reset_n(~reset),
+    .rx(io_in[11]),
+    .data(uart_rx_data), 
+    .done(uart_rx_valid), // TODO assert this longer
+    .framing_error(io_out[10])
+  );
+
+  uart_tx transmitter(
+    .clock(clock),
+    .reset_n(~reset),
+    .send(uart_tx_send),
+    .data(uart_tx_data),
+    .tx(io_out[11]),
+    .ready(uart_tx_ready)
+  );
+
+  Bob bobby(
+    .clock(clock),
+    .reset_n(~reset),
+    .uart_rx_data(uart_rx_data),
+    .uart_rx_valid(uart_rx_valid),
+    .uart_rx_data(uart_rx_data),
+    .uart_tx_ready(uart_tx_ready),
+    .uart_tx_send(uart_tx_send),
+    .bob_busy(io_out[9]),
+    .runway_active(io_out[8:7])
+  );
+
+endmodule : BobTop
+
 module Bob(
-  input  logic       clock, reset_n,
+  input  logic       clock, reset_n, 
   input  logic [8:0] uart_rx_data,   // Data from UART
   input  logic       uart_rx_valid,  // High if data is ready to be read
   output logic [8:0] uart_tx_data,   // Data to write to UART
   input  logic       uart_tx_ready,  // High if ready to write to UART
   output logic       uart_tx_send,   // High if data is ready for transmit
-  output logic       bob_busy        // High if Bob has too many requests
+  output logic       bob_busy,       // High if Bob has too many requests
+  output logic [1:0] runway_active   // Tracks runway status
 );      
   
   // For UART Request Storage FIFO
@@ -26,7 +72,6 @@ module Bob(
   // For RunwayManager
   logic runway_id;
   logic lock, unlock;
-  logic [1:0] runway_active;
 
   // For Aircraft Takeoff FIFO
   logic queue_takeoff_plane, unqueue_takeoff_plane;
@@ -76,7 +121,10 @@ module Bob(
   // Aircraft Take-Off FIFO //
   ////////////////////////////
 
-  FIFO #(.WIDTH(4), .DEPTH(4)) takeoff_fifo(
+  FIFO #(
+    .WIDTH(4), 
+    .DEPTH(4)
+  ) takeoff_fifo(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(uart_request.plane_id),
@@ -91,7 +139,10 @@ module Bob(
   // Aircraft Landing FIFO //
   ///////////////////////////
   
-  FIFO #(.WIDTH(4), .DEPTH(4)) landing_fifo(
+  FIFO #(
+    .WIDTH(4), 
+    .DEPTH(4)
+  ) landing_fifo(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(uart_request.plane_id),
@@ -144,7 +195,10 @@ module Bob(
   // UART Reply Storage FIFO //
   /////////////////////////////
 
-  FIFO #(.WIDTH(9), .DEPTH(4)) uart_replies(
+  FIFO #(
+    .WIDTH(9), 
+    .DEPTH(4)
+  ) uart_replies(
     .clock(clock),
     .reset_n(reset_n),
     .data_in(reply_to_send),
@@ -246,6 +300,7 @@ module ReadRequestFSM
     runway_id             = 1'b0;
     set_emergency         = 1'b0;
     unset_emergency       = 1'b0;
+
     unique case (state) 
       QUIET: begin
         if (uart_empty) 
@@ -255,6 +310,7 @@ module ReadRequestFSM
           uart_rd_request = 1'b1;
         end
       end
+
       INTERPRET: begin
         if (msg_type == T_REQUEST) begin
           next_state = REPLY;
@@ -325,6 +381,7 @@ module ReadRequestFSM
           send_say_ag = 1'b1;
         end
       end
+
       REPLY: begin
         if (reply_fifo_full) begin
           next_state  = REPLY;
@@ -333,6 +390,7 @@ module ReadRequestFSM
           queue_reply = 1'b1;
         end
       end
+
       CHECK_QUEUES: begin
         if (emergency) begin
           if (!landing_fifo_empty) begin
@@ -358,6 +416,7 @@ module ReadRequestFSM
           next_state            = QUIET;
         end
       end
+
       CLR_TAKEOFF: begin
         next_state = QUEUE_CLR;
         if (!runway_active[0]) begin
@@ -371,6 +430,7 @@ module ReadRequestFSM
           send_clear  = 2'b01;
         end
       end
+
       CLR_LANDING: begin
         next_state = QUEUE_CLR;
         if (!runway_active[0]) begin
@@ -384,10 +444,12 @@ module ReadRequestFSM
           send_clear = 2'b10;
         end
       end
+
       DIVERT_LANDING: begin
         next_state          = QUEUE_CLR;
         send_divert_landing = 1'b1;
       end
+
       QUEUE_CLR: begin
         next_state  = QUIET;
         queue_reply = 1'b1;
@@ -550,3 +612,33 @@ module RunwayManager
   end
 
 endmodule : RunwayManager
+
+module AircraftIDManager(
+  input logic [3:0]  id_to_free,
+  input logic        free_id,
+  output logic [3:0] id_to_take,
+  output logic       take_id
+);
+
+  logic [15:0] taken_id; // One-hot register that tracks if ID is taken
+
+  // always_comb
+  //   case (1'b0):
+  //     taken_id[0]:
+  //     taken_id[1]:
+  //     taken_id[2]:
+  //     taken_id[3]:
+  //     taken_id[4]:
+  //     taken_id[5]:
+  //     taken_id[6]:
+  //     taken_id[7]:
+  //     taken_id[8]:
+  //     taken_id[9]:
+  //     taken_id[10]:
+  //     taken_id[11]:
+  //     taken_id[12]:
+  //     taken_id[13]:
+  //     taken_id[14]:
+  //     taken_id[15]:
+  //   endcase
+endmodule : AircraftIDManager

@@ -2,7 +2,7 @@
 
 module uart_rx(
   input  logic       clock, reset_n, 
-  input  logic       rx,             // Serial data input line
+  input  logic       rx,              // Serial data input line
   output logic [8:0] data,            // Data received
   output logic       done,            // High if data is fully received
   output logic       framing_error
