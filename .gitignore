@@ -4,3 +4,5 @@ simv
 test/*
 !test/Bob*
 !test/testbench.mk
+DVEfiles/*
+AN\.DB/*
