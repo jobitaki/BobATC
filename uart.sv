@@ -2,7 +2,7 @@
 // 9 data bits, no parity bit, 1 stop bit
 
 module uart_tb();
-  logic       clock, reset_n;
+  logic       clock, reset;
   logic       send;           // High to send data
   logic [8:0] data_tx;           // Data to send
   logic       tx;             // Serial data output line
@@ -27,9 +27,9 @@ module uart_tb();
 initial begin
     data_tx = 9'b0110_1010_1;
     
-    reset_n <= 1'b0;
+    reset <= 1'b1;
     @(posedge clock);
-    reset_n <= 1'b1;
+    reset <= 1'b0;
     @(posedge clock);
     @(posedge clock);
     @(posedge clock);

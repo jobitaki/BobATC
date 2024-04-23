@@ -1,7 +1,7 @@
 `default_nettype none
 
 module uart_tx(
-  input  logic       clock, reset_n, 
+  input  logic       clock, reset, 
   input  logic       send,           // High to send data
   input  logic [8:0] data,           // Data to send
   output logic       tx,             // Serial data output line
@@ -16,7 +16,7 @@ module uart_tx(
     .SAMPLE_RATE(16)
   ) conductor(
     .clock(clock),
-    .reset_n(reset_n),
+    .reset(reset),
     .start_rx(1'b0),
     .start_tx(start),
     .tick(tick)
@@ -29,8 +29,8 @@ module uart_tx(
 
   assign done_data = data_counter == 4'd9;
 
-  always_ff @(posedge clock, negedge reset_n) 
-    if (!reset_n || clear_data_counter) 
+  always_ff @(posedge clock, posedge reset) 
+    if (reset || clear_data_counter) 
       data_counter <= '0;
     else if (en_data_counter && tick)
       data_counter <= data_counter + 1;
@@ -39,16 +39,16 @@ module uart_tx(
   logic       data_bit;
   logic       send_data;
 
-  always_ff @(posedge clock, negedge reset_n) 
-    if (!reset_n)
+  always_ff @(posedge clock, posedge reset) 
+    if (reset)
       saved_data <= '0;
     else if (start)
       saved_data <= data;
     else if (send_data && tick)
       saved_data <= saved_data >> 1; // LSB first
 
-  always_ff @(posedge clock, negedge reset_n)
-    if (!reset_n) 
+  always_ff @(posedge clock, posedge reset)
+    if (reset) 
       data_bit <= 1'b0;
     else if (send_data && tick) 
       data_bit <= saved_data[0];
@@ -56,8 +56,8 @@ module uart_tx(
   logic send_start_bit;
   logic send_stop_bit;
 
-  always_ff @(posedge clock, negedge reset_n)
-    if (!reset_n) 
+  always_ff @(posedge clock, posedge reset)
+    if (reset) 
       tx <= 1'b1;
     else if (send_start_bit) 
       tx <= 1'b0;
@@ -70,7 +70,7 @@ module uart_tx(
 
   uart_tx_fsm fsm(
     .clock(clock),
-    .reset_n(reset_n),
+    .reset(reset),
     .send(send),
     .tick(tick),
     .done_data(done_data),
@@ -86,7 +86,7 @@ module uart_tx(
 endmodule : uart_tx
 
 module uart_tx_fsm(
-  input  logic clock, reset_n,
+  input  logic clock, reset,
   input  logic send,
   input  logic tick, 
   input  logic done_data,
@@ -157,8 +157,8 @@ module uart_tx_fsm(
     endcase
   end
 
-  always_ff @(posedge clock, negedge reset_n)
-    if (!reset_n)
+  always_ff @(posedge clock, posedge reset)
+    if (reset)
       state <= IDLE;
     else
       state <= next_state;

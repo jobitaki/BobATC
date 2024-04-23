@@ -1,7 +1,7 @@
 `default_nettype none
 
 module uart_rx(
-  input  logic       clock, reset_n, 
+  input  logic       clock, reset, 
   input  logic       rx,              // Serial data input line
   output logic [8:0] data,            // Data received
   output logic       done,            // High if data is fully received
@@ -16,7 +16,7 @@ module uart_rx(
     .SAMPLE_RATE(16)
   ) conductor(
     .clock(clock),
-    .reset_n(reset_n),
+    .reset(reset),
     .start_rx(start),
     .start_tx(1'b0),
     .tick(tick)
@@ -28,8 +28,8 @@ module uart_rx(
   logic [3:0] data_counter;
   logic       done_data;
 
-  always_ff @(posedge clock, negedge reset_n)
-    if (!reset_n) 
+  always_ff @(posedge clock, posedge reset)
+    if (reset) 
       data <= '0;
     else if (collect_data && tick) begin
       data    <= data >> 1;
@@ -38,15 +38,15 @@ module uart_rx(
 
   assign done_data = data_counter == 4'd9;
 
-  always_ff @(posedge clock, negedge reset_n)
-    if (!reset_n || clear_data_counter)
+  always_ff @(posedge clock, posedge reset)
+    if (reset || clear_data_counter)
       data_counter <= '0;
     else if (en_data_counter && tick) 
       data_counter <= data_counter + 1'b1;
 
   uart_rx_fsm fsm(
     .clock(clock),
-    .reset_n(reset_n),
+    .reset(reset),
     .tick(tick),
     .rx(rx),
     .done_data(done_data),
@@ -61,7 +61,7 @@ module uart_rx(
 endmodule : uart_rx
 
 module uart_rx_fsm(
-  input  logic clock, reset_n,
+  input  logic clock, reset,
   input  logic tick,
   input  logic rx,
   input  logic done_data,
@@ -135,8 +135,8 @@ module uart_rx_fsm(
     endcase
   end
 
-  always_ff @(posedge clock, negedge reset_n)
-    if (!reset_n) 
+  always_ff @(posedge clock, posedge reset)
+    if (reset) 
       state <= IDLE;
     else
       state <= next_state;

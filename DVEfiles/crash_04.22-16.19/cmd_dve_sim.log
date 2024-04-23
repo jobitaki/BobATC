@@ -1,0 +1,54 @@
+set ucliGUI::state
+set ucliGUI::state
+ucliCore::getToolPID
+synopsys::env hasTB
+trigger_hier_stack_context_switch 0
+synUtils::setDVEInitPhase 1
+synopsys::dump -type VPD -file /afs/andrew.cmu.edu/usr3/jaehyun3/private/18224-sftp/BobATC/inter.vpd -locking
+synopsys::dump -autoflush on -fid VPD0
+set ::dve_fid VPD0
+synUtils::setDVEInitPhase 0
+ucliCore::getToolPID
+synUtils::sendTool -active _icl_setToolSocket /tmp/smlnpjp7LoQ
+synUtils::sendTool -active {_icl_start_rpc -version "T-2022.06_Full64" -sync_file /tmp/vcs_dve_rpc.jaehyun3.23622}
+synUtils::sendTool -active {_icl_createSharedMemory /tmp/vcs_dve_general.jaehyun3.23622}
+config endofsim noexit
+config onfail enable all
+config syscaddplainmembers
+config syscaddsourcenames
+config syscaddstructtypes
+synopsys::listing -disable
+synopsys::dump -add {uart_tb} -scope "." -depth 1 -fid VPD0
+synopsys::run
+set ucliGUI::state
+set ucliGUI::state
+set synopsys::env(time) 8346805
+set synopsys::env(time) 20898154
+set synopsys::env(time) 33948251
+set synopsys::env(time) 43895016
+set synopsys::env(time) 55096387
+set synopsys::env(time) 64938161
+set synopsys::env(time) 77448523
+set synopsys::env(time) 86100719
+set synopsys::env(time) 98716525
+set synopsys::env(time) 111608277
+set synopsys::env(time) 122770034
+set synopsys::env(time) 135513259
+set synopsys::env(time) 146448187
+ucliCore::getToolPID
+ucliCore::stopTool -no_signal
+set ucliGUI::state
+5738887
+set synopsys::env(time) 318840927
+set synopsys::env(time) 331971815
+set synopsys::env(time) 345080007
+set synopsys::env(time) 357559837
+set synopsys::env(time) 369989537
+set synopsys::env(time) 378637416
+set synopsys::env(time) 388580378
+set synopsys::env(time) 400303275
+set synopsys::env(time) 413390719
+set synopsys::env(time) 425160293
+set synopsys::env(time) 434488403
+set synopsys::env(time) 444449773
+set synopsys::env(time) 455743639
