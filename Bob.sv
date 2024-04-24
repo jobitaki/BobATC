@@ -313,6 +313,8 @@ module ReadRequestFSM
       end
 
       INTERPRET: begin
+        // TODO release IDs
+        // TODO ignore untaken ids
         if (msg_type == T_REQUEST) begin
           next_state = REPLY;
           if (msg_action == 2'b0x) begin
@@ -563,20 +565,23 @@ module FIFO
 endmodule : FIFO
 
 //
-// Module 'RunwayManager'
-// 
-// - When lock is asserted, the runway indicated by the runway_id input
-//   will be locked and associated with the plane_id input. 
-// - When unlock is asserted, the runway indicated by the runway_id input
-//   will be unlocked only if the plane_id on the input is equal. 
+//  Module 'RunwayManager'
+//  
+//  A set of registers that manage runway activity status to prevent runway
+//  usage conflicts.
+//    - When lock is asserted, the runway indicated by the runway_id input
+//      will be locked and associated with the plane_id input. 
+//    - When unlock is asserted, the runway indicated by the runway_id input
+//      will be unlocked only if the plane_id on the input is equal. 
 //
-module RunwayManager
-  (input  logic       clock, reset,
-   input  logic [3:0] plane_id,
-   input  logic       runway_id,
-   input  logic       lock,
-   input  logic       unlock,
-   output logic [1:0] runway_active);
+module RunwayManager(
+  input  logic       clock, reset,
+  input  logic [3:0] plane_id,
+  input  logic       runway_id,
+  input  logic       lock,
+  input  logic       unlock,
+  output logic [1:0] runway_active
+);
 
   // Register that contain the current status of each runway
   // Contains 4 bits of plane ID followed by runway status (1 for lock)
@@ -590,21 +595,25 @@ module RunwayManager
       runway[0].active <= 0;
       runway[1].active <= 0;
       runway <= 0;
-    end else begin
+    end 
+    else begin
       if (lock && !unlock) begin
         if (runway_id) begin
           runway[1].plane_id <= plane_id;
           runway[1].active <= 1'b1;
-        end else begin
+        end 
+        else begin
           runway[0].plane_id <= plane_id;
           runway[0].active <= 1'b1;
         end
-      end else if (!lock && unlock) begin
+      end 
+      else if (!lock && unlock) begin
         if (runway_id) begin
           // Prevent other planes from unlocking runway
           if (plane_id == runway[1].plane_id)
             runway[1].active <= 1'b0;
-        end else begin
+        end 
+        else begin
           if (plane_id == runway[0].plane_id)
             runway[0].active <= 1'b0;
         end
@@ -618,75 +627,59 @@ endmodule : RunwayManager
 //  Module 'AircraftIDManager'
 //
 //  Keeps track of 16 IDs that can be assigned to aircraft entering the airspace
-//  and also the handshakes of the aircraft assigned to the ID.
 //
 module AircraftIDManager(
-  input  logic       clock, reset,
-  input  logic [3:0] id_in,
-  input  logic       release_id, 
-  input  logic       validate,
-  input  logic       query_id,
-  input  logic [5:0] handshake_in,
-  output logic [3:0] id_out,
-  output logic       take_id,
-  output logic       full,
-  output logic [5:0] handshake_out,
-  output logic       handshake_valid
+  input  logic        clock, reset,
+  input  logic [3:0]  id_in,
+  input  logic        release_id, 
+  input  logic        take_id,
+  output logic [3:0]  id_out,
+  output logic [15:0] all_id,
+  output logic        full
 );
 
-  plane_t [15:0] plane_file;
-  logic   [3:0]  id_avail;
+  // TODO when a request is not made by ID in certain number of interpret
+  // cycles, give up ID to someone else. 100 cycles? 
+
+  logic [15:0] taken_id;
+  logic [3:0]  id_avail;
+
+  assign id_out = id_avail; // always available
+  assign full   = taken_id == 16'hFFFF;
 
   always_comb begin
-    full = 1'b0;
+    id_avail = 4'd0;
 
     case (1'b0)
-      plane_file[0].taken:  id_avail = 4'd0;
-      plane_file[1].taken:  id_avail = 4'd1;
-      plane_file[2].taken:  id_avail = 4'd2;
-      plane_file[3].taken:  id_avail = 4'd3;
-      plane_file[4].taken:  id_avail = 4'd4;
-      plane_file[5].taken:  id_avail = 4'd5;
-      plane_file[6].taken:  id_avail = 4'd6;
-      plane_file[7].taken:  id_avail = 4'd7;
-      plane_file[8].taken:  id_avail = 4'd8;
-      plane_file[9].taken:  id_avail = 4'd9;
-      plane_file[10].taken: id_avail = 4'd10;
-      plane_file[11].taken: id_avail = 4'd11;
-      plane_file[12].taken: id_avail = 4'd12;
-      plane_file[13].taken: id_avail = 4'd13;
-      plane_file[14].taken: id_avail = 4'd14;
-      plane_file[15].taken: id_avail = 4'd15;
-      default:              full     = 1'b1;
+      taken_id[0]:  id_avail = 4'd0;
+      taken_id[1]:  id_avail = 4'd1;
+      taken_id[2]:  id_avail = 4'd2;
+      taken_id[3]:  id_avail = 4'd3;
+      taken_id[4]:  id_avail = 4'd4;
+      taken_id[5]:  id_avail = 4'd5;
+      taken_id[6]:  id_avail = 4'd6;
+      taken_id[7]:  id_avail = 4'd7;
+      taken_id[8]:  id_avail = 4'd8;
+      taken_id[9]:  id_avail = 4'd9;
+      taken_id[10]: id_avail = 4'd10;
+      taken_id[11]: id_avail = 4'd11;
+      taken_id[12]: id_avail = 4'd12;
+      taken_id[13]: id_avail = 4'd13;
+      taken_id[14]: id_avail = 4'd14;
+      taken_id[15]: id_avail = 4'd15;
+      default:      id_avail = 4'd0;
     endcase
-  end
-
-  always_comb begin
-    handshake_valid = 1'b0;
-
-    if (validate) begin
-      if (plane_file[id_in].handshake == handshake_in) begin
-        handshake_valid = 1'b1;
-      end
-    end
   end
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      plane_file <= '0;
+      taken_id <= '0;
     end 
     else if (release_id) begin
-      if (plane_file[id_in].handshake == handshake_in) begin
-        plane_file[id_in].taken <= 1'b0;
-      end
+      taken_id[id_in] <= 1'b0;
     end 
     else if (take_id && !full) begin
-      id_out                         <= id_avail;
-      plane_file[id_avail].taken     <= 1'b1;
-      plane_file[id_avail].handshake <= handshake_in;
-    end
-    else if (query_id) begin
-      handshake_out <= plane_file[id_in].handshake;
+      taken_id[id_avail] <= 1'b1;
     end
   end
 

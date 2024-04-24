@@ -21,8 +21,4 @@ package BobATC;
     logic [1:0] msg_action;
   } msg_t;
 
-  typedef struct packed {
-    logic       taken;
-    logic [5:0] handshake;
-  } plane_t;
 endpackage
