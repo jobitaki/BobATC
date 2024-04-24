@@ -10,11 +10,12 @@ import BobATC::*;
 
 module BobTop(
   input  logic        clock, reset,
-  input  logic [11:0] io_in,
-  output logic [11:0] io_out
+  input  logic        rx,
+  output logic        tx,
+  output logic        framing_error,
+  output logic        bob_busy,
+  output logic [1:0]  runway_active
 );
-
-  assign io_out[6:0] = '0;
 
   logic [8:0] uart_rx_data, uart_tx_data;
   logic       uart_rx_valid;
@@ -24,10 +25,10 @@ module BobTop(
   uart_rx receiver(
     .clock(clock),
     .reset(reset),
-    .rx(io_in[11]),
+    .rx(rx),
     .data(uart_rx_data), 
-    .done(uart_rx_valid), // TODO assert this longer
-    .framing_error(io_out[10])
+    .done(uart_rx_valid), 
+    .framing_error(framing_error)
   );
 
   uart_tx transmitter(
@@ -35,7 +36,7 @@ module BobTop(
     .reset(reset),
     .send(uart_tx_send),
     .data(uart_tx_data),
-    .tx(io_out[11]),
+    .tx(tx),
     .ready(uart_tx_ready)
   );
 
@@ -47,8 +48,8 @@ module BobTop(
     .uart_tx_data(uart_tx_data),
     .uart_tx_ready(uart_tx_ready),
     .uart_tx_send(uart_tx_send),
-    .bob_busy(io_out[9]),
-    .runway_active(io_out[8:7])
+    .bob_busy(bob_busy),
+    .runway_active(runway_active)
   );
 
 endmodule : BobTop
@@ -613,32 +614,80 @@ module RunwayManager
 
 endmodule : RunwayManager
 
+// 
+//  Module 'AircraftIDManager'
+//
+//  Keeps track of 16 IDs that can be assigned to aircraft entering the airspace
+//  and also the handshakes of the aircraft assigned to the ID.
+//
 module AircraftIDManager(
-  input logic [3:0]  id_to_free,
-  input logic        free_id,
-  output logic [3:0] id_to_take,
-  output logic       take_id
+  input  logic       clock, reset,
+  input  logic [3:0] id_in,
+  input  logic       release_id, 
+  input  logic       validate,
+  input  logic       query_id,
+  input  logic [5:0] handshake_in,
+  output logic [3:0] id_out,
+  output logic       take_id,
+  output logic       full,
+  output logic [5:0] handshake_out,
+  output logic       handshake_valid
 );
 
-  logic [15:0] taken_id; // One-hot register that tracks if ID is taken
+  plane_t [15:0] plane_file;
+  logic   [3:0]  id_avail;
 
-  // always_comb
-  //   case (1'b0):
-  //     taken_id[0]:
-  //     taken_id[1]:
-  //     taken_id[2]:
-  //     taken_id[3]:
-  //     taken_id[4]:
-  //     taken_id[5]:
-  //     taken_id[6]:
-  //     taken_id[7]:
-  //     taken_id[8]:
-  //     taken_id[9]:
-  //     taken_id[10]:
-  //     taken_id[11]:
-  //     taken_id[12]:
-  //     taken_id[13]:
-  //     taken_id[14]:
-  //     taken_id[15]:
-  //   endcase
+  always_comb begin
+    full = 1'b0;
+
+    case (1'b0)
+      plane_file[0].taken:  id_avail = 4'd0;
+      plane_file[1].taken:  id_avail = 4'd1;
+      plane_file[2].taken:  id_avail = 4'd2;
+      plane_file[3].taken:  id_avail = 4'd3;
+      plane_file[4].taken:  id_avail = 4'd4;
+      plane_file[5].taken:  id_avail = 4'd5;
+      plane_file[6].taken:  id_avail = 4'd6;
+      plane_file[7].taken:  id_avail = 4'd7;
+      plane_file[8].taken:  id_avail = 4'd8;
+      plane_file[9].taken:  id_avail = 4'd9;
+      plane_file[10].taken: id_avail = 4'd10;
+      plane_file[11].taken: id_avail = 4'd11;
+      plane_file[12].taken: id_avail = 4'd12;
+      plane_file[13].taken: id_avail = 4'd13;
+      plane_file[14].taken: id_avail = 4'd14;
+      plane_file[15].taken: id_avail = 4'd15;
+      default:              full     = 1'b1;
+    endcase
+  end
+
+  always_comb begin
+    handshake_valid = 1'b0;
+
+    if (validate) begin
+      if (plane_file[id_in].handshake == handshake_in) begin
+        handshake_valid = 1'b1;
+      end
+    end
+  end
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      plane_file <= '0;
+    end 
+    else if (release_id) begin
+      if (plane_file[id_in].handshake == handshake_in) begin
+        plane_file[id_in].taken <= 1'b0;
+      end
+    end 
+    else if (take_id && !full) begin
+      id_out                         <= id_avail;
+      plane_file[id_avail].taken     <= 1'b1;
+      plane_file[id_avail].handshake <= handshake_in;
+    end
+    else if (query_id) begin
+      handshake_out <= plane_file[id_in].handshake;
+    end
+  end
+
 endmodule : AircraftIDManager

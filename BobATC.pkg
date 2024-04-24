@@ -16,8 +16,13 @@ package BobATC;
   } runway_t;
 
   typedef struct packed {
-    logic [3:0] plane_id;
     msg_type_t  msg_type;
+    logic [3:0] plane_id;
     logic [1:0] msg_action;
   } msg_t;
+
+  typedef struct packed {
+    logic       taken;
+    logic [5:0] handshake;
+  } plane_t;
 endpackage
