@@ -1,6 +1,6 @@
 `default_nettype none
 
-module uart_rx(
+module UartRX(
   input  logic       clock, reset, 
   input  logic       rx,              // Serial data input line
   output logic [8:0] data,            // Data received
@@ -10,7 +10,7 @@ module uart_rx(
 
   logic start, tick;
 
-  baud_rate_generator #(
+  BaudRateGenerator #(
     .CLK_HZ(25_000_000),
     .BAUD_RATE(9600),
     .SAMPLE_RATE(16)
@@ -44,7 +44,7 @@ module uart_rx(
     else if (en_data_counter && tick) 
       data_counter <= data_counter + 1'b1;
 
-  uart_rx_fsm fsm(
+  UartRXFsm fsm(
     .clock(clock),
     .reset(reset),
     .tick(tick),
@@ -58,9 +58,9 @@ module uart_rx(
     .done(done)
   );
 
-endmodule : uart_rx
+endmodule : UartRX
 
-module uart_rx_fsm(
+module UartRXFsm(
   input  logic clock, reset,
   input  logic tick,
   input  logic rx,
@@ -141,4 +141,4 @@ module uart_rx_fsm(
     else
       state <= next_state;
 
-endmodule : uart_rx_fsm
+endmodule : UartRXFsm

@@ -1,14 +1,16 @@
 // A basic implementation of 9N1 UART protocol
 // 9 data bits, no parity bit, 1 stop bit
 
-module uart_tb();
+module UartTB();
   logic       clock, reset;
   logic       send;           // High to send data
   logic [8:0] data_tx;           // Data to send
   logic       tx;             // Serial data output line
   logic       ready;
 
-  uart_tx dut_tx(.data(data_tx), .*);
+  UartTX dut_tx(.data(data_tx), .*);
+
+  logic hello;
 
   logic       rx;             // Serial data input line
   logic [8:0] data_rx;        // Data received
@@ -17,7 +19,7 @@ module uart_tb();
 
   assign rx = tx;
 
-  uart_rx dut_rx(.data(data_rx), .*);
+  UartRX dut_rx(.data(data_rx), .*);
 
   initial begin
     clock = 0;
@@ -44,4 +46,4 @@ initial begin
     $finish;
   end
 
-endmodule : uart_tb
+endmodule : UartTB

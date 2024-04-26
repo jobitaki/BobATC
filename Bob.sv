@@ -22,7 +22,7 @@ module BobTop(
   logic       uart_tx_ready;
   logic       uart_tx_send;
 
-  uart_rx receiver(
+  UartRX receiver(
     .clock(clock),
     .reset(reset),
     .rx(rx),
@@ -31,7 +31,7 @@ module BobTop(
     .framing_error(framing_error)
   );
 
-  uart_tx transmitter(
+  UartTX transmitter(
     .clock(clock),
     .reset(reset),
     .send(uart_tx_send),
@@ -158,7 +158,7 @@ module Bob(
   // FSM //
   /////////
 
-  ReadRequestFSM fsm(.*);
+  ReadRequestFsm fsm(.*);
 
   /////////////////////
   // Reply Generator //
@@ -210,7 +210,7 @@ module Bob(
     .empty(reply_fifo_empty)
   );
 
-  SendReplyFSM reply_fsm(
+  SendReplyFsm reply_fsm(
     .clock(clock),
     .reset(reset),
     .uart_tx_ready(uart_tx_ready),
@@ -241,7 +241,7 @@ module Bob(
 
 endmodule : Bob
 
-module ReadRequestFSM
+module ReadRequestFsm
   (input  logic       clock, reset,
    input  logic       uart_empty,
    input  msg_t       uart_request,
@@ -470,9 +470,9 @@ module ReadRequestFSM
     end
   end
 
-endmodule : ReadRequestFSM
+endmodule : ReadRequestFsm
 
-module SendReplyFSM
+module SendReplyFsm
   (input  logic clock, reset,
    input  logic uart_tx_ready,
    input  logic reply_fifo_empty,
@@ -507,7 +507,7 @@ module SendReplyFSM
       state <= next_state;
   end
 
-endmodule : SendReplyFSM
+endmodule : SendReplyFsm
 
 //
 //  Module 'FIFO'
@@ -683,4 +683,4 @@ module AircraftIDManager(
     end
   end
 
-endmodule : AircraftIDManager
+endmodule: AircraftIDManager

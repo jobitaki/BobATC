@@ -1,16 +1,16 @@
 `default_nettype none
 
-module uart_tx(
+module UartTX(
   input  logic       clock, reset, 
   input  logic       send,           // High to send data
   input  logic [8:0] data,           // Data to send
   output logic       tx,             // Serial data output line
   output logic       ready           // High if TX is not busy
-);         
+);
 
   logic start, tick;
 
-  baud_rate_generator #(
+  BaudRateGenerator #(
     .CLK_HZ(25_000_000),
     .BAUD_RATE(9600),
     .SAMPLE_RATE(16)
@@ -68,7 +68,7 @@ module uart_tx(
     else 
       tx <= 1'b1;
 
-  uart_tx_fsm fsm(
+  UartTXFsm fsm(
     .clock(clock),
     .reset(reset),
     .send(send),
@@ -83,9 +83,9 @@ module uart_tx(
     .ready(ready)
   );
   
-endmodule : uart_tx
+endmodule : UartTX
 
-module uart_tx_fsm(
+module UartTXFsm(
   input  logic clock, reset,
   input  logic send,
   input  logic tick, 
@@ -116,7 +116,8 @@ module uart_tx_fsm(
           next_state     = START;
           start          = 1'b1;
           send_start_bit = 1'b1;
-        end else begin
+        end 
+        else begin
           next_state     = IDLE;
           ready          = 1'b1;
         end
@@ -127,7 +128,8 @@ module uart_tx_fsm(
           next_state      = SEND;
           send_data       = 1'b1;
           en_data_counter = 1'b1;
-        end else begin
+        end 
+        else begin
           next_state     = START;
           send_start_bit = 1'b1;
         end
@@ -138,7 +140,8 @@ module uart_tx_fsm(
           next_state         = STOP;
           send_stop_bit      = 1'b1;
           clear_data_counter = 1'b1;
-        end else begin
+        end 
+        else begin
           next_state      = SEND;
           send_data       = 1'b1;
           en_data_counter = 1'b1;
@@ -149,18 +152,24 @@ module uart_tx_fsm(
         if (tick) begin
           next_state = IDLE;
           ready      = 1'b1;
-        end else begin
+        end 
+        else begin
           next_state    = STOP;
           send_stop_bit = 1'b1;
         end
       end
+
+      default: next_state = IDLE;
     endcase
   end
 
-  always_ff @(posedge clock)
-    if (reset)
+  always_ff @(posedge clock) begin
+    if (reset) begin
       state <= IDLE;
-    else
+    end
+    else begin
       state <= next_state;
+    end
+  end
 
-endmodule : uart_tx_fsm
+endmodule : UartTXFsm
