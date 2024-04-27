@@ -129,8 +129,8 @@ module UartRXFsm(
           clear_data_counter = 1'b1;
         end else if (tick && !rx) begin
           next_state    = FRAMING_ERROR;
-          framing_error = 1'b1;
         end
+        framing_error = 1'b1;
       end
     endcase
   end

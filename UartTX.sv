@@ -48,9 +48,9 @@ module UartTX(
       saved_data <= saved_data >> 1; // LSB first
 
   always_ff @(posedge clock)
-    if (reset) 
+    if (reset || start)
       data_bit <= 1'b0;
-    else if (send_data && tick) 
+    else if (send_data && tick)
       data_bit <= saved_data[0];
 
   logic send_start_bit;
@@ -68,7 +68,7 @@ module UartTX(
     else 
       tx <= 1'b1;
 
-  uart_tx_fsm fsm(
+  UartTXFsm fsm(
     .clock(clock),
     .reset(reset),
     .send(send),
@@ -82,10 +82,10 @@ module UartTX(
     .clear_data_counter(clear_data_counter),
     .ready(ready)
   );
-  
-endmodule : UartTx
 
-module UartTxFSM(
+endmodule : UartTX
+
+module UartTXFsm(
   input  logic clock, reset,
   input  logic send,
   input  logic tick, 
@@ -163,4 +163,4 @@ module UartTxFSM(
     else
       state <= next_state;
 
-endmodule: UartTxFSM
+endmodule: UartTXFsm

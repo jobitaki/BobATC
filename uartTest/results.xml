@@ -1,0 +1,8 @@
+<testsuites name="results">
+  <testsuite name="all" package="all">
+    <property name="random_seed" value="1714239583" />
+    <testcase name="basic_test" classname="Uart_test" file="/Users/jaehyunlim/Documents/CMU/18224-sftp/BobATC/uartTest/Uart_test.py" lineno="83" time="0.3988490104675293" sim_time_ns="539380.001" ratio_time="1352341.3292858389" />
+    <testcase name="tx_test" classname="Uart_test" file="/Users/jaehyunlim/Documents/CMU/18224-sftp/BobATC/uartTest/Uart_test.py" lineno="141" time="27.758899211883545" sim_time_ns="36787700.000999995" ratio_time="1325257.882893686" />
+    <testcase name="rx_test" classname="Uart_test" file="/Users/jaehyunlim/Documents/CMU/18224-sftp/BobATC/uartTest/Uart_test.py" lineno="172" time="0.000209808349609375" sim_time_ns="60.00100000202656" ratio_time="285980.0389914773" />
+  </testsuite>
+</testsuites>

@@ -137,6 +137,47 @@ async def basic_test(dut):
       end = get_sim_time(units="ns")
       break
   await FallingEdge(dut.clock)
+  await FallingEdge(dut.clock)
+  
+  print("////////////////////////////////////////")
+  print("//         Finish basic tests         //")
+  print("////////////////////////////////////////\n")
 
+@cocotb.test()
+async def stress_test_takeoff(dut):
+  print("////////////////////////////////////////")
+  print("//         Begin basic tests          //")
+  print("////////////////////////////////////////\n")
+
+  # Run the clock
+  cocotb.start_soon(Clock(dut.clock, 100, units="ns").start())
+
+  dut.reset.value = True
   await FallingEdge(dut.clock)
   await FallingEdge(dut.clock)
+  dut.reset.value = False
+  await FallingEdge(dut.clock)
+  await FallingEdge(dut.clock)
+
+  dut.uart_tx_ready.value = True # UART always ready to transmit
+
+  # Plane id_1 requests takeoff
+  id_1 = (random.randint(0, 15) << 5)
+  await send_uart_request(dut, id_1 + (T_REQUEST << 2) + R_TAKEOFF)
+  start = get_sim_time(units="ns")
+  print(f"Plane {"{:02d}".format(id_1 >> 5)}: Requesting takeoff at time {start}")
+
+  while True:
+    await FallingEdge(dut.clock)
+    if get_sim_time(units="ns") - start > 10000:
+      raise TimeoutError("Did not receive clearance")
+    if detect_uart_reply(dut, id_1 + (T_CLEAR << 2) + C_TAKEOFF_0):
+      print("")
+      print("////////////////////////////////////////")
+      print("// TB      : Takeoff request success! //")
+      print("////////////////////////////////////////\n")
+      end = get_sim_time(units="ns")
+      break
+  await FallingEdge(dut.clock)
+
+  return 0
