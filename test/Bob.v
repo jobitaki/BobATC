@@ -1,29 +1,79 @@
 `default_nettype none
+module BobTop (
+	clock,
+	reset,
+	rx,
+	tx,
+	framing_error,
+	bob_busy,
+	runway_active
+);
+	input wire clock;
+	input wire reset;
+	input wire rx;
+	output wire tx;
+	output wire framing_error;
+	output wire bob_busy;
+	output wire [1:0] runway_active;
+	wire [8:0] uart_rx_data;
+	wire [8:0] uart_tx_data;
+	wire uart_rx_valid;
+	wire uart_tx_ready;
+	wire uart_tx_send;
+	UartRX receiver(
+		.clock(clock),
+		.reset(reset),
+		.rx(rx),
+		.data(uart_rx_data),
+		.done(uart_rx_valid),
+		.framing_error(framing_error)
+	);
+	UartTX transmitter(
+		.clock(clock),
+		.reset(reset),
+		.send(uart_tx_send),
+		.data(uart_tx_data),
+		.tx(tx),
+		.ready(uart_tx_ready)
+	);
+	Bob bobby(
+		.clock(clock),
+		.reset(reset),
+		.uart_rx_data(uart_rx_data),
+		.uart_rx_valid(uart_rx_valid),
+		.uart_tx_data(uart_tx_data),
+		.uart_tx_ready(uart_tx_ready),
+		.uart_tx_send(uart_tx_send),
+		.bob_busy(bob_busy),
+		.runway_active(runway_active)
+	);
+endmodule
 module Bob (
 	clock,
-	reset_n,
+	reset,
 	uart_rx_data,
 	uart_rx_valid,
 	uart_tx_data,
 	uart_tx_ready,
 	uart_tx_send,
-	bob_busy
+	bob_busy,
+	runway_active
 );
 	input wire clock;
-	input wire reset_n;
+	input wire reset;
 	input wire [8:0] uart_rx_data;
 	input wire uart_rx_valid;
 	output wire [8:0] uart_tx_data;
 	input wire uart_tx_ready;
 	output wire uart_tx_send;
 	output wire bob_busy;
+	output wire [1:0] runway_active;
 	wire [8:0] uart_request;
 	wire uart_rd_request;
 	wire uart_empty;
 	wire runway_id;
 	wire lock;
 	wire unlock;
-	wire [1:0] runway_active;
 	wire queue_takeoff_plane;
 	wire unqueue_takeoff_plane;
 	wire [3:0] cleared_takeoff_id;
@@ -52,7 +102,7 @@ module Bob (
 		.DEPTH(4)
 	) uart_requests(
 		.clock(clock),
-		.reset_n(reset_n),
+		.reset(reset),
 		.data_in(uart_rx_data),
 		.we(uart_rx_valid),
 		.re(uart_rd_request),
@@ -65,7 +115,7 @@ module Bob (
 		.DEPTH(4)
 	) takeoff_fifo(
 		.clock(clock),
-		.reset_n(reset_n),
+		.reset(reset),
 		.data_in(uart_request[8-:4]),
 		.we(queue_takeoff_plane),
 		.re(unqueue_takeoff_plane),
@@ -78,7 +128,7 @@ module Bob (
 		.DEPTH(4)
 	) landing_fifo(
 		.clock(clock),
-		.reset_n(reset_n),
+		.reset(reset),
 		.data_in(uart_request[8-:4]),
 		.we(queue_landing_plane),
 		.re(unqueue_landing_plane),
@@ -86,9 +136,9 @@ module Bob (
 		.full(landing_fifo_full),
 		.empty(landing_fifo_empty)
 	);
-	ReadRequestFSM fsm(
+	ReadRequestFsm fsm(
 		.clock(clock),
-		.reset_n(reset_n),
+		.reset(reset),
 		.uart_empty(uart_empty),
 		.uart_request(uart_request),
 		.takeoff_fifo_full(takeoff_fifo_full),
@@ -115,8 +165,8 @@ module Bob (
 		.set_emergency(set_emergency),
 		.unset_emergency(unset_emergency)
 	);
-	always @(posedge clock or negedge reset_n)
-		if (~reset_n)
+	always @(posedge clock)
+		if (reset)
 			reply_to_send <= 0;
 		else if (send_clear[0] ^ send_clear[1]) begin
 			if (send_clear[0]) begin
@@ -127,31 +177,35 @@ module Bob (
 			else if (send_clear[1]) begin
 				reply_to_send[8-:4] <= cleared_landing_id;
 				reply_to_send[4-:3] <= 3'b011;
-				reply_to_send[1-:2] <= {1'b0, runway_id};
+				reply_to_send[1-:2] <= {1'b1, runway_id};
 			end
 		end
 		else if (send_hold) begin
 			reply_to_send[8-:4] <= uart_request[8-:4];
 			reply_to_send[4-:3] <= 3'b100;
+			reply_to_send[1-:2] <= 2'b00;
 		end
 		else if (send_say_ag) begin
 			reply_to_send[8-:4] <= uart_request[8-:4];
 			reply_to_send[4-:3] <= 3'b101;
+			reply_to_send[1-:2] <= 2'b00;
 		end
 		else if (send_divert) begin
 			reply_to_send[8-:4] <= uart_request[8-:4];
 			reply_to_send[4-:3] <= 3'b110;
+			reply_to_send[1-:2] <= 2'b00;
 		end
 		else if (send_divert_landing) begin
 			reply_to_send[8-:4] <= cleared_landing_id;
 			reply_to_send[4-:3] <= 3'b110;
+			reply_to_send[1-:2] <= 2'b00;
 		end
 	FIFO #(
 		.WIDTH(9),
 		.DEPTH(4)
 	) uart_replies(
 		.clock(clock),
-		.reset_n(reset_n),
+		.reset(reset),
 		.data_in(reply_to_send),
 		.we(queue_reply),
 		.re(send_reply),
@@ -159,9 +213,9 @@ module Bob (
 		.full(reply_fifo_full),
 		.empty(reply_fifo_empty)
 	);
-	SendReplyFSM reply_fsm(
+	SendReplyFsm reply_fsm(
 		.clock(clock),
-		.reset_n(reset_n),
+		.reset(reset),
 		.uart_tx_ready(uart_tx_ready),
 		.reply_fifo_empty(reply_fifo_empty),
 		.send_reply(send_reply),
@@ -169,24 +223,24 @@ module Bob (
 	);
 	RunwayManager manager(
 		.clock(clock),
-		.reset_n(reset_n),
+		.reset(reset),
 		.plane_id(uart_request[8-:4]),
 		.runway_id(runway_id),
 		.lock(lock),
 		.unlock(unlock),
 		.runway_active(runway_active)
 	);
-	always @(posedge clock or negedge reset_n)
-		if (~reset_n)
+	always @(posedge clock)
+		if (reset)
 			emergency <= 1'b0;
 		else if (set_emergency)
 			emergency <= 1'b1;
 		else if (unset_emergency)
 			emergency <= 1'b0;
 endmodule
-module ReadRequestFSM (
+module ReadRequestFsm (
 	clock,
-	reset_n,
+	reset,
 	uart_empty,
 	uart_request,
 	takeoff_fifo_full,
@@ -214,7 +268,7 @@ module ReadRequestFSM (
 	unset_emergency
 );
 	input wire clock;
-	input wire reset_n;
+	input wire reset;
 	input wire uart_empty;
 	input wire [8:0] uart_request;
 	input wire takeoff_fifo_full;
@@ -275,7 +329,7 @@ module ReadRequestFSM (
 			3'b001:
 				if (msg_type == 3'b000) begin
 					next_state = 3'b010;
-					if (msg_action == 2'b0x) begin
+					if (msg_action[1] == 1'b0) begin
 						if (takeoff_fifo_full)
 							send_divert = 1'b1;
 						else begin
@@ -283,7 +337,7 @@ module ReadRequestFSM (
 							send_hold = 1'b1;
 						end
 					end
-					else if (msg_action == 2'b1x) begin
+					else if (msg_action[1] == 1'b1) begin
 						if (landing_fifo_full || emergency)
 							send_divert = 1'b1;
 						else begin
@@ -350,23 +404,27 @@ module ReadRequestFSM (
 					else
 						next_state = 3'b000;
 				end
-				else if (!takeoff_fifo_empty && !landing_fifo_empty) begin
-					if (takeoff_first) begin
+				else if (runway_active != 2'b11) begin
+					if (!takeoff_fifo_empty && !landing_fifo_empty) begin
+						if (takeoff_first) begin
+							next_state = 3'b100;
+							unqueue_takeoff_plane = 1'b1;
+						end
+						else begin
+							next_state = 3'b101;
+							unqueue_landing_plane = 1'b1;
+						end
+					end
+					else if (!takeoff_fifo_empty) begin
 						next_state = 3'b100;
 						unqueue_takeoff_plane = 1'b1;
 					end
-					else begin
+					else if (!landing_fifo_empty) begin
 						next_state = 3'b101;
 						unqueue_landing_plane = 1'b1;
 					end
-				end
-				else if (!takeoff_fifo_empty) begin
-					next_state = 3'b100;
-					unqueue_takeoff_plane = 1'b1;
-				end
-				else if (!landing_fifo_empty) begin
-					next_state = 3'b101;
-					unqueue_landing_plane = 1'b1;
+					else
+						next_state = 3'b000;
 				end
 				else
 					next_state = 3'b000;
@@ -404,10 +462,11 @@ module ReadRequestFSM (
 				next_state = 3'b000;
 				queue_reply = 1'b1;
 			end
+			default: next_state = 3'b000;
 		endcase
 	end
-	always @(posedge clock or negedge reset_n)
-		if (~reset_n) begin
+	always @(posedge clock)
+		if (reset) begin
 			state <= 3'b000;
 			takeoff_first <= 1'b0;
 		end
@@ -416,16 +475,16 @@ module ReadRequestFSM (
 			takeoff_first <= ~takeoff_first;
 		end
 endmodule
-module SendReplyFSM (
+module SendReplyFsm (
 	clock,
-	reset_n,
+	reset,
 	uart_tx_ready,
 	reply_fifo_empty,
 	send_reply,
 	uart_tx_send
 );
 	input wire clock;
-	input wire reset_n;
+	input wire reset;
 	input wire uart_tx_ready;
 	input wire reply_fifo_empty;
 	output reg send_reply;
@@ -447,17 +506,18 @@ module SendReplyFSM (
 				next_state = 1'd0;
 				uart_tx_send = 1'b1;
 			end
+			default: next_state = 1'd0;
 		endcase
 	end
-	always @(posedge clock or negedge reset_n)
-		if (~reset_n)
+	always @(posedge clock)
+		if (reset)
 			state <= 1'd0;
 		else
 			state <= next_state;
 endmodule
 module FIFO (
 	clock,
-	reset_n,
+	reset,
 	data_in,
 	we,
 	re,
@@ -465,10 +525,10 @@ module FIFO (
 	full,
 	empty
 );
-	parameter WIDTH = 9;
-	parameter DEPTH = 4;
+	parameter signed [31:0] WIDTH = 9;
+	parameter signed [31:0] DEPTH = 4;
 	input wire clock;
-	input wire reset_n;
+	input wire reset;
 	input wire [WIDTH - 1:0] data_in;
 	input wire we;
 	input wire re;
@@ -481,11 +541,12 @@ module FIFO (
 	reg [$clog2(DEPTH) - 1:0] get_ptr;
 	assign empty = count == 0;
 	assign full = count == DEPTH;
-	always @(posedge clock or negedge reset_n)
-		if (~reset_n) begin
+	always @(posedge clock)
+		if (reset) begin
 			count <= 0;
 			get_ptr <= 0;
 			put_ptr <= 0;
+			data_out <= 0;
 		end
 		else if ((re && !empty) && we) begin
 			data_out <= queue[get_ptr * WIDTH+:WIDTH];
@@ -506,7 +567,7 @@ module FIFO (
 endmodule
 module RunwayManager (
 	clock,
-	reset_n,
+	reset,
 	plane_id,
 	runway_id,
 	lock,
@@ -514,7 +575,7 @@ module RunwayManager (
 	runway_active
 );
 	input wire clock;
-	input wire reset_n;
+	input wire reset;
 	input wire [3:0] plane_id;
 	input wire runway_id;
 	input wire lock;
@@ -523,8 +584,8 @@ module RunwayManager (
 	reg [9:0] runway;
 	assign runway_active[0] = runway[0];
 	assign runway_active[1] = runway[5];
-	always @(posedge clock or negedge reset_n)
-		if (~reset_n) begin
+	always @(posedge clock)
+		if (reset) begin
 			runway[0] <= 0;
 			runway[5] <= 0;
 			runway <= 0;
@@ -547,4 +608,56 @@ module RunwayManager (
 			else if (plane_id == runway[4-:4])
 				runway[0] <= 1'b0;
 		end
+endmodule
+module AircraftIDManager (
+	clock,
+	reset,
+	id_in,
+	release_id,
+	take_id,
+	id_out,
+	all_id,
+	full
+);
+	input wire clock;
+	input wire reset;
+	input wire [3:0] id_in;
+	input wire release_id;
+	input wire take_id;
+	output wire [3:0] id_out;
+	output wire [15:0] all_id;
+	output wire full;
+	reg [15:0] taken_id;
+	reg [3:0] id_avail;
+	assign id_out = id_avail;
+	assign full = taken_id == 16'hffff;
+	always @(*) begin
+		id_avail = 4'd0;
+		case (1'b0)
+			taken_id[0]: id_avail = 4'd0;
+			taken_id[1]: id_avail = 4'd1;
+			taken_id[2]: id_avail = 4'd2;
+			taken_id[3]: id_avail = 4'd3;
+			taken_id[4]: id_avail = 4'd4;
+			taken_id[5]: id_avail = 4'd5;
+			taken_id[6]: id_avail = 4'd6;
+			taken_id[7]: id_avail = 4'd7;
+			taken_id[8]: id_avail = 4'd8;
+			taken_id[9]: id_avail = 4'd9;
+			taken_id[10]: id_avail = 4'd10;
+			taken_id[11]: id_avail = 4'd11;
+			taken_id[12]: id_avail = 4'd12;
+			taken_id[13]: id_avail = 4'd13;
+			taken_id[14]: id_avail = 4'd14;
+			taken_id[15]: id_avail = 4'd15;
+			default: id_avail = 4'd0;
+		endcase
+	end
+	always @(posedge clock)
+		if (reset)
+			taken_id <= 1'sb0;
+		else if (release_id)
+			taken_id[id_in] <= 1'b0;
+		else if (take_id && !full)
+			taken_id[id_avail] <= 1'b1;
 endmodule

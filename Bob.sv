@@ -166,27 +166,33 @@ module Bob (
     if (reset) begin
       reply_to_send <= 0;
     end else if (send_clear[0] ^ send_clear[1]) begin
-      if (send_clear[0]) begin
+      // "send_clear" is two signals, one for takeoff and one for landing.
+      // It is one-hot encoded, hence the XOR evaluator.
+      if (send_clear[0]) begin // Cleared for takeoff
         reply_to_send.plane_id   <= cleared_takeoff_id;
         reply_to_send.msg_type   <= T_CLEAR;
         reply_to_send.msg_action <= {1'b0, runway_id};
-      end else if (send_clear[1]) begin
+      end else if (send_clear[1]) begin // Cleared for landing
         reply_to_send.plane_id   <= cleared_landing_id;
         reply_to_send.msg_type   <= T_CLEAR;
-        reply_to_send.msg_action <= {1'b0, runway_id};
+        reply_to_send.msg_action <= {1'b1, runway_id};
       end
     end else if (send_hold) begin
-      reply_to_send.plane_id <= uart_request.plane_id;
-      reply_to_send.msg_type <= T_HOLD;
+      reply_to_send.plane_id   <= uart_request.plane_id;
+      reply_to_send.msg_type   <= T_HOLD;
+      reply_to_send.msg_action <= 2'b00;
     end else if (send_say_ag) begin
-      reply_to_send.plane_id <= uart_request.plane_id;
-      reply_to_send.msg_type <= T_SAY_AGAIN;
+      reply_to_send.plane_id   <= uart_request.plane_id;
+      reply_to_send.msg_type   <= T_SAY_AGAIN;
+      reply_to_send.msg_action <= 2'b00;
     end else if (send_divert) begin
-      reply_to_send.plane_id <= uart_request.plane_id;
-      reply_to_send.msg_type <= T_DIVERT;
+      reply_to_send.plane_id   <= uart_request.plane_id;
+      reply_to_send.msg_type   <= T_DIVERT;
+      reply_to_send.msg_action <= 2'b00;
     end else if (send_divert_landing) begin
-      reply_to_send.plane_id <= cleared_landing_id;
-      reply_to_send.msg_type <= T_DIVERT;
+      reply_to_send.plane_id   <= cleared_landing_id;
+      reply_to_send.msg_type   <= T_DIVERT;
+      reply_to_send.msg_action <= 2'b00;
     end
   end
 
@@ -241,7 +247,7 @@ endmodule : Bob
 
 module ReadRequestFsm (
     input  logic       clock,
-    reset,
+    input  logic       reset,
     input  logic       uart_empty,
     input  msg_t       uart_request,
     input  logic       takeoff_fifo_full,
@@ -321,7 +327,7 @@ module ReadRequestFsm (
         // TODO ignore untaken ids
         if (msg_type == T_REQUEST) begin
           next_state = REPLY;
-          if (msg_action == 2'b0x) begin
+          if (msg_action[1] == 1'b0) begin
             // Trying to take off, and if fifo full, just deny.
             if (takeoff_fifo_full) begin
               send_divert = 1'b1;
@@ -329,7 +335,7 @@ module ReadRequestFsm (
               queue_takeoff_plane = 1'b1;
               send_hold           = 1'b1;
             end
-          end else if (msg_action == 2'b1x) begin
+          end else if (msg_action[1] == 1'b1) begin
             // Trying to land, and if fifo full or emergency, just deny.
             if (landing_fifo_full || emergency) begin
               send_divert = 1'b1;
@@ -403,20 +409,24 @@ module ReadRequestFsm (
             next_state            = DIVERT_LANDING;
             unqueue_landing_plane = 1'b1;
           end else next_state = QUIET;
-        end else if (!takeoff_fifo_empty && !landing_fifo_empty) begin
-          if (takeoff_first) begin
+        end else if (runway_active != 2'b11) begin // If runways aren't full
+          if (!takeoff_fifo_empty && !landing_fifo_empty) begin
+            if (takeoff_first) begin
+              next_state            = CLR_TAKEOFF;
+              unqueue_takeoff_plane = 1'b1;
+            end else begin
+              next_state            = CLR_LANDING;
+              unqueue_landing_plane = 1'b1;
+            end
+          end else if (!takeoff_fifo_empty) begin
             next_state            = CLR_TAKEOFF;
             unqueue_takeoff_plane = 1'b1;
-          end else begin
+          end else if (!landing_fifo_empty) begin
             next_state            = CLR_LANDING;
             unqueue_landing_plane = 1'b1;
+          end else begin
+            next_state = QUIET;
           end
-        end else if (!takeoff_fifo_empty) begin
-          next_state            = CLR_TAKEOFF;
-          unqueue_takeoff_plane = 1'b1;
-        end else if (!landing_fifo_empty) begin
-          next_state            = CLR_LANDING;
-          unqueue_landing_plane = 1'b1;
         end else begin
           next_state = QUIET;
         end
@@ -478,7 +488,7 @@ endmodule : ReadRequestFsm
 
 module SendReplyFsm (
     input  logic clock,
-    reset,
+    input  logic reset,
     input  logic uart_tx_ready,
     input  logic reply_fifo_empty,
     output logic send_reply,
@@ -555,9 +565,10 @@ module FIFO #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      count   <= 0;
-      get_ptr <= 0;
-      put_ptr <= 0;
+      count    <= 0;
+      get_ptr  <= 0;
+      put_ptr  <= 0;
+      data_out <= 0;
     end else begin
       // If reading (and not empty) and writing, first read and then write
       if ((re && !empty) && we) begin
