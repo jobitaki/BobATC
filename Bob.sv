@@ -14,7 +14,6 @@ module BobTop (
     input  logic       rx,
     output logic       tx,
     output logic       framing_error,
-    output logic       bob_busy,
     output logic [1:0] runway_active
 );
 
@@ -49,7 +48,6 @@ module BobTop (
       .uart_tx_data(uart_tx_data),
       .uart_tx_ready(uart_tx_ready),
       .uart_tx_send(uart_tx_send),
-      .bob_busy(bob_busy),
       .runway_active(runway_active)
   );
 
@@ -63,7 +61,6 @@ module Bob (
     output logic [8:0] uart_tx_data,   // Data to write to UART
     input  logic       uart_tx_ready,  // High if ready to write to UART
     output logic       uart_tx_send,   // High if data is ready for transmit
-    output logic       bob_busy,       // High if Bob has too many requests
     output logic [1:0] runway_active   // Tracks runway status
 );
 
@@ -116,7 +113,7 @@ module Bob (
       .we(uart_rx_valid),
       .re(uart_rd_request),
       .data_out({uart_request.plane_id, uart_request.msg_type, uart_request.msg_action}),
-      .full(bob_busy),
+      .full(),
       .empty(uart_empty)
   );
 
@@ -369,8 +366,34 @@ module ReadRequestFsm (
 
     case (state)
       QUIET: begin
-        if (uart_empty) next_state = CHECK_QUEUES;
-        else begin
+        if (uart_empty) begin
+          if (emergency) begin
+            if (!landing_fifo_empty) begin
+              next_state            = DIVERT_LANDING;
+              unqueue_landing_plane = 1'b1;
+            end else next_state = QUIET;
+          end else if (runway_active != 2'b11) begin  // If runways aren't full
+            if (!takeoff_fifo_empty && !landing_fifo_empty) begin
+              if (takeoff_first) begin
+                next_state            = CLR_TAKEOFF;
+                unqueue_takeoff_plane = 1'b1;
+              end else begin
+                next_state            = CLR_LANDING;
+                unqueue_landing_plane = 1'b1;
+              end
+            end else if (!takeoff_fifo_empty) begin
+              next_state            = CLR_TAKEOFF;
+              unqueue_takeoff_plane = 1'b1;
+            end else if (!landing_fifo_empty) begin
+              next_state            = CLR_LANDING;
+              unqueue_landing_plane = 1'b1;
+            end else begin
+              next_state = QUIET;
+            end
+          end else begin
+            next_state = QUIET;  // If runways are full don't clear anything
+          end
+        end else begin
           next_state      = INTERPRET;
           uart_rd_request = 1'b1;
         end

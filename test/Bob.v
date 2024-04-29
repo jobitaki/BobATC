@@ -5,7 +5,6 @@ module BobTop (
 	rx,
 	tx,
 	framing_error,
-	bob_busy,
 	runway_active
 );
 	input wire clock;
@@ -13,7 +12,6 @@ module BobTop (
 	input wire rx;
 	output wire tx;
 	output wire framing_error;
-	output wire bob_busy;
 	output wire [1:0] runway_active;
 	wire [8:0] uart_rx_data;
 	wire [8:0] uart_tx_data;
@@ -44,7 +42,6 @@ module BobTop (
 		.uart_tx_data(uart_tx_data),
 		.uart_tx_ready(uart_tx_ready),
 		.uart_tx_send(uart_tx_send),
-		.bob_busy(bob_busy),
 		.runway_active(runway_active)
 	);
 endmodule
@@ -56,7 +53,6 @@ module Bob (
 	uart_tx_data,
 	uart_tx_ready,
 	uart_tx_send,
-	bob_busy,
 	runway_active
 );
 	input wire clock;
@@ -66,7 +62,6 @@ module Bob (
 	output wire [8:0] uart_tx_data;
 	input wire uart_tx_ready;
 	output wire uart_tx_send;
-	output wire bob_busy;
 	output wire [1:0] runway_active;
 	wire [8:0] uart_request;
 	wire uart_rd_request;
@@ -112,7 +107,7 @@ module Bob (
 		.we(uart_rx_valid),
 		.re(uart_rd_request),
 		.data_out({uart_request[8-:4], uart_request[4-:3], uart_request[1-:2]}),
-		.full(bob_busy),
+		.full(),
 		.empty(uart_empty)
 	);
 	FIFO #(
@@ -391,8 +386,40 @@ module ReadRequestFsm (
 		sel_takeoff_id_lock = 1'b0;
 		case (state)
 			3'b000:
-				if (uart_empty)
-					next_state = 3'b011;
+				if (uart_empty) begin
+					if (emergency) begin
+						if (!landing_fifo_empty) begin
+							next_state = 3'b110;
+							unqueue_landing_plane = 1'b1;
+						end
+						else
+							next_state = 3'b000;
+					end
+					else if (runway_active != 2'b11) begin
+						if (!takeoff_fifo_empty && !landing_fifo_empty) begin
+							if (takeoff_first) begin
+								next_state = 3'b100;
+								unqueue_takeoff_plane = 1'b1;
+							end
+							else begin
+								next_state = 3'b101;
+								unqueue_landing_plane = 1'b1;
+							end
+						end
+						else if (!takeoff_fifo_empty) begin
+							next_state = 3'b100;
+							unqueue_takeoff_plane = 1'b1;
+						end
+						else if (!landing_fifo_empty) begin
+							next_state = 3'b101;
+							unqueue_landing_plane = 1'b1;
+						end
+						else
+							next_state = 3'b000;
+					end
+					else
+						next_state = 3'b000;
+				end
 				else begin
 					next_state = 3'b001;
 					uart_rd_request = 1'b1;
