@@ -75,6 +75,8 @@ module Bob (
   // For RunwayManager
   logic runway_id;
   logic lock, unlock;
+  logic [3:0] cleared_id_to_lock;
+  logic sel_takeoff_id_lock;
 
   // For Aircraft Takeoff FIFO
   logic queue_takeoff_plane, unqueue_takeoff_plane;
@@ -253,10 +255,15 @@ module Bob (
       .uart_tx_send(uart_tx_send)
   );
 
-  RunwayManager manager (
+  always_comb
+    if (sel_takeoff_id_lock) cleared_id_to_lock = cleared_takeoff_id;
+    else cleared_id_to_lock = cleared_landing_id;
+
+  RunwayManager runway_manager (
       .clock(clock),
       .reset(reset),
-      .plane_id(uart_request.plane_id),
+      .plane_id_unlock(uart_request.plane_id),
+      .plane_id_lock(cleared_id_to_lock),
       .runway_id(runway_id),
       .lock(lock),
       .unlock(unlock),
@@ -311,7 +318,8 @@ module ReadRequestFsm (
     output logic        set_emergency,
     output logic        unset_emergency,
     output logic        take_id,
-    output logic        release_id
+    output logic        release_id,
+    output logic        sel_takeoff_id_lock
 );
 
   logic      [3:0] plane_id;
@@ -357,6 +365,7 @@ module ReadRequestFsm (
     unset_emergency       = 1'b0;
     take_id               = 1'b0;
     release_id            = 1'b0;
+    sel_takeoff_id_lock   = 1'b1;
 
     case (state)
       QUIET: begin
@@ -489,12 +498,13 @@ module ReadRequestFsm (
             next_state = QUIET;
           end
         end else begin
-          next_state = QUIET;
+          next_state = QUIET;  // If runways are full don't clear anything
         end
       end
 
       CLR_TAKEOFF: begin
         next_state = QUEUE_CLR;
+        sel_takeoff_id_lock = 1'b1;
         if (!runway_active[0]) begin
           // Place lock on runway 0
           runway_id  = 1'b0;
@@ -664,7 +674,8 @@ endmodule : FIFO
 module RunwayManager (
     input  logic       clock,
     input  logic       reset,
-    input  logic [3:0] plane_id,
+    input  logic [3:0] plane_id_unlock,
+    input  logic [3:0] plane_id_lock,
     input  logic       runway_id,
     input  logic       lock,
     input  logic       unlock,
@@ -680,24 +691,22 @@ module RunwayManager (
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      runway[0].active <= 0;
-      runway[1].active <= 0;
       runway <= 0;
     end else begin
       if (lock && !unlock) begin
         if (runway_id) begin
-          runway[1].plane_id <= plane_id;
+          runway[1].plane_id <= plane_id_lock;
           runway[1].active   <= 1'b1;
         end else begin
-          runway[0].plane_id <= plane_id;
+          runway[0].plane_id <= plane_id_lock;
           runway[0].active   <= 1'b1;
         end
       end else if (!lock && unlock) begin
         if (runway_id) begin
           // Prevent other planes from unlocking runway
-          if (plane_id == runway[1].plane_id) runway[1].active <= 1'b0;
+          if (plane_id_unlock == runway[1].plane_id) runway[1].active <= 1'b0;
         end else begin
-          if (plane_id == runway[0].plane_id) runway[0].active <= 1'b0;
+          if (plane_id_unlock == runway[0].plane_id) runway[0].active <= 1'b0;
         end
       end
     end

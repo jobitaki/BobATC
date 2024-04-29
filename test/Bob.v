@@ -74,6 +74,8 @@ module Bob (
 	wire runway_id;
 	wire lock;
 	wire unlock;
+	reg [3:0] cleared_id_to_lock;
+	wire sel_takeoff_id_lock;
 	wire queue_takeoff_plane;
 	wire unqueue_takeoff_plane;
 	wire [3:0] cleared_takeoff_id;
@@ -188,7 +190,8 @@ module Bob (
 		.set_emergency(set_emergency),
 		.unset_emergency(unset_emergency),
 		.take_id(take_id),
-		.release_id(release_id)
+		.release_id(release_id),
+		.sel_takeoff_id_lock(sel_takeoff_id_lock)
 	);
 	always @(posedge clock)
 		if (reset)
@@ -256,10 +259,16 @@ module Bob (
 		.send_reply(send_reply),
 		.uart_tx_send(uart_tx_send)
 	);
-	RunwayManager manager(
+	always @(*)
+		if (sel_takeoff_id_lock)
+			cleared_id_to_lock = cleared_takeoff_id;
+		else
+			cleared_id_to_lock = cleared_landing_id;
+	RunwayManager runway_manager(
 		.clock(clock),
 		.reset(reset),
-		.plane_id(uart_request[8-:4]),
+		.plane_id_unlock(uart_request[8-:4]),
+		.plane_id_lock(cleared_id_to_lock),
 		.runway_id(runway_id),
 		.lock(lock),
 		.unlock(unlock),
@@ -311,7 +320,8 @@ module ReadRequestFsm (
 	set_emergency,
 	unset_emergency,
 	take_id,
-	release_id
+	release_id,
+	sel_takeoff_id_lock
 );
 	input wire clock;
 	input wire reset;
@@ -347,6 +357,7 @@ module ReadRequestFsm (
 	output reg unset_emergency;
 	output reg take_id;
 	output reg release_id;
+	output reg sel_takeoff_id_lock;
 	wire [3:0] plane_id;
 	wire [2:0] msg_type;
 	wire [1:0] msg_action;
@@ -377,6 +388,7 @@ module ReadRequestFsm (
 		unset_emergency = 1'b0;
 		take_id = 1'b0;
 		release_id = 1'b0;
+		sel_takeoff_id_lock = 1'b1;
 		case (state)
 			3'b000:
 				if (uart_empty)
@@ -508,6 +520,7 @@ module ReadRequestFsm (
 					next_state = 3'b000;
 			3'b100: begin
 				next_state = 3'b111;
+				sel_takeoff_id_lock = 1'b1;
 				if (!runway_active[0]) begin
 					runway_id = 1'b0;
 					lock = 1'b1;
@@ -646,7 +659,8 @@ endmodule
 module RunwayManager (
 	clock,
 	reset,
-	plane_id,
+	plane_id_unlock,
+	plane_id_lock,
 	runway_id,
 	lock,
 	unlock,
@@ -654,7 +668,8 @@ module RunwayManager (
 );
 	input wire clock;
 	input wire reset;
-	input wire [3:0] plane_id;
+	input wire [3:0] plane_id_unlock;
+	input wire [3:0] plane_id_lock;
 	input wire runway_id;
 	input wire lock;
 	input wire unlock;
@@ -663,27 +678,24 @@ module RunwayManager (
 	assign runway_active[0] = runway[0];
 	assign runway_active[1] = runway[5];
 	always @(posedge clock)
-		if (reset) begin
-			runway[0] <= 0;
-			runway[5] <= 0;
+		if (reset)
 			runway <= 0;
-		end
 		else if (lock && !unlock) begin
 			if (runway_id) begin
-				runway[9-:4] <= plane_id;
+				runway[9-:4] <= plane_id_lock;
 				runway[5] <= 1'b1;
 			end
 			else begin
-				runway[4-:4] <= plane_id;
+				runway[4-:4] <= plane_id_lock;
 				runway[0] <= 1'b1;
 			end
 		end
 		else if (!lock && unlock) begin
 			if (runway_id) begin
-				if (plane_id == runway[9-:4])
+				if (plane_id_unlock == runway[9-:4])
 					runway[5] <= 1'b0;
 			end
-			else if (plane_id == runway[4-:4])
+			else if (plane_id_unlock == runway[4-:4])
 				runway[0] <= 1'b0;
 		end
 endmodule

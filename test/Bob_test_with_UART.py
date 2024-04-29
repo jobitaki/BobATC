@@ -158,7 +158,7 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     return detect[1]
 
 
-@cocotb.test()
+# @cocotb.test()
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
@@ -223,19 +223,73 @@ async def stress_test_takeoff(dut):
   assert dut.bobby.id_full.value
 
   for i in range(2):
-    # Plane requests takeoff
+    # Planes 00, 01 request takeoff, immediately cleared
     await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_CLEAR << 2) + i, False)
+
+  assert dut.runway_active.value == 0b11 
+  assert dut.bobby.takeoff_fifo.empty.value
+
+  for i in range(2, 6):
+    # 4 planes request takeoff, all on hold (10, 11, 100, 101)
+    await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_HOLD << 2), False)
+
+  assert dut.bobby.takeoff_fifo.full.value
+
+  for i in range(6, 16):
+    # Planes request takeoff, diverted
+    await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_DIVERT << 2), False)
+  
+  dut.bobby.takeoff_fifo.count.value == 0b100
+  
+  for i in range(4):
+    # Planes declare takeoff
+    await request(dut, i, T_DECLARE, i % 2, ((i + 2) << 5) + (T_CLEAR << 2) + (i % 2), False)
+
+  print("////////////////////////////////////////")
+  print("//     Finish takeoff stress tests    //")
+  print("////////////////////////////////////////\n")
+
+# @cocotb.test()
+async def stress_test_landing(dut):
+  print("////////////////////////////////////////")
+  print("//     Begin landing stress tests     //")
+  print("////////////////////////////////////////\n")
+
+  # Run the clock
+  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+
+  dut.reset.value = True
+  await FallingEdge(dut.clock)
+  dut.reset.value = False
+  await FallingEdge(dut.clock)
+
+  id = []
+  for i in range(16):
+    # Plane requests ID
+    id.append(await request(dut, 0, T_ID_PLEASE, 0, (i << 5) + (T_ID_PLEASE << 2), False))
+  
+  assert dut.bobby.all_id.value == 0xFFFF
+  assert dut.bobby.id_full.value
+
+  for i in range(2):
+    # Plane requests takeoff
+    await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_CLEAR << 2) + 0b10 + i, False)
   
   for i in range(2, 6):
     # Plane requests takeoff
-    await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_HOLD << 2), False)
+    await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_HOLD << 2), False)
 
   for i in range(6, 16):
     # Plane requests takeoff
-    await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_DIVERT << 2), False)
+    await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_DIVERT << 2), False)
   
   for i in range(2):
     # Planes declare takeoff
-    await request(dut, i, T_DECLARE, i, ((i + 2) << 5) + (T_CLEAR << 2) + (i % 2), False)
+    await request(dut, i, T_DECLARE, 0b10 + i, ((i + 2) << 5) + (T_CLEAR << 2) + 0b10 + (i % 2), False)
 
+  print("////////////////////////////////////////")
+  print("//     Finish landing stress tests    //")
+  print("////////////////////////////////////////\n")
+
+def stress_test_id():
   return 0
