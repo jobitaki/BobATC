@@ -157,7 +157,6 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     print("////////////////////////////////////////\n")
     return detect[1]
 
-
 @cocotb.test()
 async def basic_test(dut):
   print("////////////////////////////////////////")
@@ -330,5 +329,36 @@ async def stress_test_landing(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-def stress_test_id():
+@cocotb.test()
+async def stress_test_id(dut):
+  print("////////////////////////////////////////")
+  print("//        Begin ID stress tests       //")
+  print("////////////////////////////////////////\n")
+
+  # Run the clock
+  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+
+  dut.reset.value = True
+  await FallingEdge(dut.clock)
+  dut.reset.value = False
+  await FallingEdge(dut.clock)
+
+  id = []
+  for i in range(16):
+    # Plane requests ID
+    id.append(await request(dut, 0, T_ID_PLEASE, 0, (i << 5) + (T_ID_PLEASE << 2), False))
+  
+  assert dut.bobby.all_id.value == 0xFFFF
+  assert dut.bobby.id_full.value
+
+  for i in range(16):
+    await request(dut, i, T_ID_PLEASE, 0, (T_ID_PLEASE << 2) + 0b11, False)
+  
+  assert dut.bobby.all_id.value == 0xFFFF
+  assert dut.bobby.id_full.value
+
+  print("////////////////////////////////////////")
+  print("//       Finish ID stress tests       //")
+  print("////////////////////////////////////////\n")
+
   return 0
