@@ -2,7 +2,6 @@ import cocotb
 from cocotb.triggers import *
 from cocotb.clock import Clock
 from cocotb.utils import get_sim_time
-import random
 
 T_REQUEST    = 0b000
 T_DECLARE    = 0b001
