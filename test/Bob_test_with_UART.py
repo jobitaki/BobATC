@@ -158,7 +158,7 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     return detect[1]
 
 
-# @cocotb.test()
+@cocotb.test()
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
@@ -244,12 +244,28 @@ async def stress_test_takeoff(dut):
   for i in range(4):
     # Planes declare takeoff
     await request(dut, i, T_DECLARE, i % 2, ((i + 2) << 5) + (T_CLEAR << 2) + (i % 2), False)
+  
+  assert dut.bobby.takeoff_fifo.empty.value
+  assert dut.bobby.runway_manager.runway.value == 0b0101101001
+
+  for i in range(6, 16):
+    await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_HOLD << 2), False)
+    await request(dut, i - 2, T_DECLARE, (i - 2) % 2, (i << 5) + (T_CLEAR << 2) + (i - 2) % 2, False)
+  
+  assert dut.bobby.all_id.value == 0xC000
+
+  for i in range(14, 16):
+    await request(dut, i, T_DECLARE, i % 2, 0, True)
+  
+  assert dut.bobby.all_id.value == 0x0000
+  assert dut.bobby.takeoff_fifo.empty.value
+  assert dut.bobby.landing_fifo.empty.value
 
   print("////////////////////////////////////////")
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-# @cocotb.test()
+@cocotb.test()
 async def stress_test_landing(dut):
   print("////////////////////////////////////////")
   print("//     Begin landing stress tests     //")
@@ -272,23 +288,46 @@ async def stress_test_landing(dut):
   assert dut.bobby.id_full.value
 
   for i in range(2):
-    # Plane requests takeoff
+    # Planes 00, 01 request landing, immediately cleared
     await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_CLEAR << 2) + 0b10 + i, False)
-  
+
+  assert dut.runway_active.value == 0b11 
+  assert dut.bobby.landing_fifo.empty.value
+
   for i in range(2, 6):
-    # Plane requests takeoff
+    # 4 planes request landing, all on hold (10, 11, 100, 101)
     await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_HOLD << 2), False)
 
+  assert dut.bobby.landing_fifo.full.value
+
   for i in range(6, 16):
-    # Plane requests takeoff
+    # Planes request landing, diverted
     await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_DIVERT << 2), False)
   
-  for i in range(2):
-    # Planes declare takeoff
-    await request(dut, i, T_DECLARE, 0b10 + i, ((i + 2) << 5) + (T_CLEAR << 2) + 0b10 + (i % 2), False)
+  dut.bobby.landing_fifo.count.value == 0b100
+  
+  for i in range(4):
+    # Planes declare landing
+    await request(dut, i, T_DECLARE, 0b10 + i % 2, ((i + 2) << 5) + (T_CLEAR << 2) + 0b10 + (i % 2), False)
+  
+  assert dut.bobby.landing_fifo.empty.value
+  assert dut.bobby.runway_manager.runway.value == 0b0101101001
+
+  for i in range(6, 16):
+    await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_HOLD << 2), False)
+    await request(dut, i - 2, T_DECLARE, (i - 2) % 2, (i << 5) + (T_CLEAR << 2) + 0b10 + (i - 2) % 2, False)
+  
+  assert dut.bobby.all_id.value == 0xC000
+
+  for i in range(14, 16):
+    await request(dut, i, T_DECLARE, 0b10 + i % 2, 0, True)
+  
+  assert dut.bobby.all_id.value == 0x0000
+  assert dut.bobby.takeoff_fifo.empty.value
+  assert dut.bobby.landing_fifo.empty.value
 
   print("////////////////////////////////////////")
-  print("//     Finish landing stress tests    //")
+  print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
 def stress_test_id():

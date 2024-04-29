@@ -388,7 +388,7 @@ module ReadRequestFsm (
 		unset_emergency = 1'b0;
 		take_id = 1'b0;
 		release_id = 1'b0;
-		sel_takeoff_id_lock = 1'b1;
+		sel_takeoff_id_lock = 1'b0;
 		case (state)
 			3'b000:
 				if (uart_empty)
