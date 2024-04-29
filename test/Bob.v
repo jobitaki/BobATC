@@ -88,6 +88,8 @@ module Bob (
 	wire send_say_ag;
 	wire send_divert;
 	wire send_divert_landing;
+	wire send_valid_id;
+	wire send_invalid_id;
 	wire [1:0] send_clear;
 	reg [8:0] reply_to_send;
 	wire send_reply;
@@ -97,6 +99,7 @@ module Bob (
 	wire set_emergency;
 	wire unset_emergency;
 	reg emergency;
+	reg [3:0] emergency_id;
 	FIFO #(
 		.WIDTH(9),
 		.DEPTH(4)
@@ -136,6 +139,21 @@ module Bob (
 		.full(landing_fifo_full),
 		.empty(landing_fifo_empty)
 	);
+	wire [3:0] new_id;
+	wire take_id;
+	wire release_id;
+	wire id_full;
+	wire [15:0] all_id;
+	AircraftIDManager id_manager(
+		.clock(clock),
+		.reset(reset),
+		.id_in(uart_request[8-:4]),
+		.release_id(release_id),
+		.take_id(take_id),
+		.id_out(new_id),
+		.all_id(all_id),
+		.full(id_full)
+	);
 	ReadRequestFsm fsm(
 		.clock(clock),
 		.reset(reset),
@@ -148,6 +166,9 @@ module Bob (
 		.reply_fifo_full(reply_fifo_full),
 		.runway_active(runway_active),
 		.emergency(emergency),
+		.all_id(all_id),
+		.id_full(id_full),
+		.emergency_id(emergency_id),
 		.uart_rd_request(uart_rd_request),
 		.queue_takeoff_plane(queue_takeoff_plane),
 		.queue_landing_plane(queue_landing_plane),
@@ -158,12 +179,16 @@ module Bob (
 		.send_say_ag(send_say_ag),
 		.send_divert(send_divert),
 		.send_divert_landing(send_divert_landing),
+		.send_invalid_id(send_invalid_id),
+		.send_valid_id(send_valid_id),
 		.queue_reply(queue_reply),
 		.lock(lock),
 		.unlock(unlock),
 		.runway_id(runway_id),
 		.set_emergency(set_emergency),
-		.unset_emergency(unset_emergency)
+		.unset_emergency(unset_emergency),
+		.take_id(take_id),
+		.release_id(release_id)
 	);
 	always @(posedge clock)
 		if (reset)
@@ -200,6 +225,16 @@ module Bob (
 			reply_to_send[4-:3] <= 3'b110;
 			reply_to_send[1-:2] <= 2'b00;
 		end
+		else if (send_invalid_id) begin
+			reply_to_send[8-:4] <= 4'd0;
+			reply_to_send[4-:3] <= 3'b111;
+			reply_to_send[1-:2] <= 2'b11;
+		end
+		else if (send_valid_id) begin
+			reply_to_send[8-:4] <= new_id;
+			reply_to_send[4-:3] <= 3'b111;
+			reply_to_send[1-:2] <= 2'b00;
+		end
 	FIFO #(
 		.WIDTH(9),
 		.DEPTH(4)
@@ -231,10 +266,14 @@ module Bob (
 		.runway_active(runway_active)
 	);
 	always @(posedge clock)
-		if (reset)
+		if (reset) begin
+			emergency_id <= 4'd0;
 			emergency <= 1'b0;
-		else if (set_emergency)
+		end
+		else if (set_emergency) begin
+			emergency_id <= uart_request[8-:4];
 			emergency <= 1'b1;
+		end
 		else if (unset_emergency)
 			emergency <= 1'b0;
 endmodule
@@ -250,6 +289,9 @@ module ReadRequestFsm (
 	reply_fifo_full,
 	runway_active,
 	emergency,
+	all_id,
+	id_full,
+	emergency_id,
 	uart_rd_request,
 	queue_takeoff_plane,
 	queue_landing_plane,
@@ -260,12 +302,16 @@ module ReadRequestFsm (
 	send_say_ag,
 	send_divert,
 	send_divert_landing,
+	send_invalid_id,
+	send_valid_id,
 	queue_reply,
 	lock,
 	unlock,
 	runway_id,
 	set_emergency,
-	unset_emergency
+	unset_emergency,
+	take_id,
+	release_id
 );
 	input wire clock;
 	input wire reset;
@@ -278,6 +324,9 @@ module ReadRequestFsm (
 	input wire reply_fifo_full;
 	input wire [1:0] runway_active;
 	input wire emergency;
+	input wire [15:0] all_id;
+	input wire id_full;
+	input wire [3:0] emergency_id;
 	output reg uart_rd_request;
 	output reg queue_takeoff_plane;
 	output reg queue_landing_plane;
@@ -288,15 +337,21 @@ module ReadRequestFsm (
 	output reg send_say_ag;
 	output reg send_divert;
 	output reg send_divert_landing;
+	output reg send_invalid_id;
+	output reg send_valid_id;
 	output reg queue_reply;
 	output reg lock;
 	output reg unlock;
 	output reg runway_id;
 	output reg set_emergency;
 	output reg unset_emergency;
+	output reg take_id;
+	output reg release_id;
+	wire [3:0] plane_id;
 	wire [2:0] msg_type;
 	wire [1:0] msg_action;
 	reg takeoff_first;
+	assign plane_id = uart_request[8-:4];
 	assign msg_type = uart_request[4-:3];
 	assign msg_action = uart_request[1-:2];
 	reg [2:0] state;
@@ -312,12 +367,16 @@ module ReadRequestFsm (
 		send_say_ag = 1'b0;
 		send_divert = 1'b0;
 		send_divert_landing = 1'b0;
+		send_invalid_id = 1'b0;
+		send_valid_id = 1'b0;
 		queue_reply = 1'b0;
 		lock = 1'b0;
 		unlock = 1'b0;
 		runway_id = 1'b0;
 		set_emergency = 1'b0;
 		unset_emergency = 1'b0;
+		take_id = 1'b0;
+		release_id = 1'b0;
 		case (state)
 			3'b000:
 				if (uart_empty)
@@ -328,46 +387,55 @@ module ReadRequestFsm (
 				end
 			3'b001:
 				if (msg_type == 3'b000) begin
-					next_state = 3'b010;
-					if (msg_action[1] == 1'b0) begin
-						if (takeoff_fifo_full)
-							send_divert = 1'b1;
-						else begin
-							queue_takeoff_plane = 1'b1;
-							send_hold = 1'b1;
+					if (all_id[plane_id]) begin
+						next_state = 3'b010;
+						if (msg_action[1] == 1'b0) begin
+							if (takeoff_fifo_full)
+								send_divert = 1'b1;
+							else begin
+								queue_takeoff_plane = 1'b1;
+								send_hold = 1'b1;
+							end
+						end
+						else if (msg_action[1] == 1'b1) begin
+							if (landing_fifo_full || emergency)
+								send_divert = 1'b1;
+							else begin
+								queue_landing_plane = 1'b1;
+								send_hold = 1'b1;
+							end
 						end
 					end
-					else if (msg_action[1] == 1'b1) begin
-						if (landing_fifo_full || emergency)
-							send_divert = 1'b1;
-						else begin
-							queue_landing_plane = 1'b1;
-							send_hold = 1'b1;
-						end
-					end
+					else
+						next_state = 3'b011;
 				end
 				else if (msg_type == 3'b001) begin
-					next_state = 3'b011;
-					if (!msg_action[1]) begin
-						if (!msg_action[0]) begin
-							unlock = 1'b1;
-							runway_id = 1'b0;
+					if (all_id[plane_id]) begin
+						next_state = 3'b011;
+						release_id = 1'b1;
+						if (!msg_action[1]) begin
+							if (!msg_action[0]) begin
+								unlock = 1'b1;
+								runway_id = 1'b0;
+							end
+							else if (msg_action[0]) begin
+								unlock = 1'b1;
+								runway_id = 1'b1;
+							end
 						end
-						else if (msg_action[0]) begin
-							unlock = 1'b1;
-							runway_id = 1'b1;
+						else if (msg_action[1]) begin
+							if (!msg_action[0]) begin
+								unlock = 1'b1;
+								runway_id = 1'b0;
+							end
+							else if (msg_action[0]) begin
+								unlock = 1'b1;
+								runway_id = 1'b1;
+							end
 						end
 					end
-					else if (msg_action[1]) begin
-						if (!msg_action[0]) begin
-							unlock = 1'b1;
-							runway_id = 1'b0;
-						end
-						else if (msg_action[0]) begin
-							unlock = 1'b1;
-							runway_id = 1'b1;
-						end
-					end
+					else
+						next_state = 3'b011;
 				end
 				else if (msg_type == 3'b010) begin
 					if (msg_action == 2'b01) begin
@@ -381,7 +449,17 @@ module ReadRequestFsm (
 					end
 					else if (msg_action == 2'b00) begin
 						next_state = 3'b011;
-						unset_emergency = 1'b1;
+						if (emergency_id == plane_id)
+							unset_emergency = 1'b1;
+					end
+				end
+				else if (msg_type == 3'b111) begin
+					next_state = 3'b010;
+					if (id_full)
+						send_invalid_id = 1'b1;
+					else begin
+						send_valid_id = 1'b1;
+						take_id = 1'b1;
 					end
 				end
 				else begin
@@ -629,6 +707,7 @@ module AircraftIDManager (
 	output wire full;
 	reg [15:0] taken_id;
 	reg [3:0] id_avail;
+	assign all_id = taken_id;
 	assign id_out = id_avail;
 	assign full = taken_id == 16'hffff;
 	always @(*) begin

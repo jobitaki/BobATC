@@ -88,6 +88,7 @@ module Bob (
 
   // For Reply Generation
   logic send_hold, send_say_ag, send_divert, send_divert_landing;
+  logic send_valid_id, send_invalid_id;
   logic [1:0] send_clear;
   msg_t reply_to_send;
 
@@ -97,6 +98,7 @@ module Bob (
 
   // For emergency latching
   logic set_emergency, unset_emergency, emergency;
+  logic [3:0] emergency_id;
 
   ///////////////////////////////
   // UART Request Storage FIFO //
@@ -152,6 +154,26 @@ module Bob (
       .empty(landing_fifo_empty)
   );
 
+  ////////////////
+  // ID Manager //
+  ////////////////
+
+  logic [3:0] new_id;
+  logic take_id, release_id;
+  logic id_full;
+  logic [15:0] all_id;
+
+  AircraftIDManager id_manager (
+      .clock(clock),
+      .reset(reset),
+      .id_in(uart_request.plane_id),
+      .release_id(release_id),
+      .take_id(take_id),
+      .id_out(new_id),
+      .all_id(all_id),
+      .full(id_full)
+  );
+
   /////////
   // FSM //
   /////////
@@ -168,11 +190,11 @@ module Bob (
     end else if (send_clear[0] ^ send_clear[1]) begin
       // "send_clear" is two signals, one for takeoff and one for landing.
       // It is one-hot encoded, hence the XOR evaluator.
-      if (send_clear[0]) begin // Cleared for takeoff
+      if (send_clear[0]) begin  // Cleared for takeoff
         reply_to_send.plane_id   <= cleared_takeoff_id;
         reply_to_send.msg_type   <= T_CLEAR;
         reply_to_send.msg_action <= {1'b0, runway_id};
-      end else if (send_clear[1]) begin // Cleared for landing
+      end else if (send_clear[1]) begin  // Cleared for landing
         reply_to_send.plane_id   <= cleared_landing_id;
         reply_to_send.msg_type   <= T_CLEAR;
         reply_to_send.msg_action <= {1'b1, runway_id};
@@ -192,6 +214,14 @@ module Bob (
     end else if (send_divert_landing) begin
       reply_to_send.plane_id   <= cleared_landing_id;
       reply_to_send.msg_type   <= T_DIVERT;
+      reply_to_send.msg_action <= 2'b00;
+    end else if (send_invalid_id) begin
+      reply_to_send.plane_id   <= 4'd0;
+      reply_to_send.msg_type   <= T_ID_PLEASE;
+      reply_to_send.msg_action <= 2'b11;
+    end else if (send_valid_id) begin
+      reply_to_send.plane_id   <= new_id;
+      reply_to_send.msg_type   <= T_ID_PLEASE;
       reply_to_send.msg_action <= 2'b00;
     end
   end
@@ -235,9 +265,11 @@ module Bob (
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      emergency <= 1'b0;
+      emergency_id <= 4'd0;
+      emergency    <= 1'b0;
     end else if (set_emergency) begin
-      emergency <= 1'b1;
+      emergency_id <= uart_request.plane_id;
+      emergency    <= 1'b1;
     end else if (unset_emergency) begin
       emergency <= 1'b0;
     end
@@ -246,39 +278,48 @@ module Bob (
 endmodule : Bob
 
 module ReadRequestFsm (
-    input  logic       clock,
-    input  logic       reset,
-    input  logic       uart_empty,
-    input  msg_t       uart_request,
-    input  logic       takeoff_fifo_full,
-    input  logic       landing_fifo_full,
-    input  logic       takeoff_fifo_empty,
-    input  logic       landing_fifo_empty,
-    input  logic       reply_fifo_full,
-    input  logic [1:0] runway_active,
-    input  logic       emergency,
-    output logic       uart_rd_request,
-    output logic       queue_takeoff_plane,
-    output logic       queue_landing_plane,
-    output logic       unqueue_takeoff_plane,
-    output logic       unqueue_landing_plane,
-    output logic [1:0] send_clear,
-    output logic       send_hold,
-    output logic       send_say_ag,
-    output logic       send_divert,
-    output logic       send_divert_landing,
-    output logic       queue_reply,
-    output logic       lock,
-    unlock,
-    output logic       runway_id,
-    output logic       set_emergency,
-    output logic       unset_emergency
+    input  logic        clock,
+    input  logic        reset,
+    input  logic        uart_empty,
+    input  msg_t        uart_request,
+    input  logic        takeoff_fifo_full,
+    input  logic        landing_fifo_full,
+    input  logic        takeoff_fifo_empty,
+    input  logic        landing_fifo_empty,
+    input  logic        reply_fifo_full,
+    input  logic [ 1:0] runway_active,
+    input  logic        emergency,
+    input  logic [15:0] all_id,
+    input  logic        id_full,
+    input  logic [ 3:0] emergency_id,
+    output logic        uart_rd_request,
+    output logic        queue_takeoff_plane,
+    output logic        queue_landing_plane,
+    output logic        unqueue_takeoff_plane,
+    output logic        unqueue_landing_plane,
+    output logic [ 1:0] send_clear,
+    output logic        send_hold,
+    output logic        send_say_ag,
+    output logic        send_divert,
+    output logic        send_divert_landing,
+    output logic        send_invalid_id,
+    output logic        send_valid_id,
+    output logic        queue_reply,
+    output logic        lock,
+    output logic        unlock,
+    output logic        runway_id,
+    output logic        set_emergency,
+    output logic        unset_emergency,
+    output logic        take_id,
+    output logic        release_id
 );
 
+  logic      [3:0] plane_id;
   msg_type_t       msg_type;
   logic      [1:0] msg_action;
   logic            takeoff_first;
 
+  assign plane_id   = uart_request.plane_id;
   assign msg_type   = uart_request.msg_type;
   assign msg_action = uart_request.msg_action;
 
@@ -306,12 +347,16 @@ module ReadRequestFsm (
     send_say_ag           = 1'b0;
     send_divert           = 1'b0;
     send_divert_landing   = 1'b0;
+    send_invalid_id       = 1'b0;
+    send_valid_id         = 1'b0;
     queue_reply           = 1'b0;
     lock                  = 1'b0;
     unlock                = 1'b0;
     runway_id             = 1'b0;
     set_emergency         = 1'b0;
     unset_emergency       = 1'b0;
+    take_id               = 1'b0;
+    release_id            = 1'b0;
 
     case (state)
       QUIET: begin
@@ -323,53 +368,60 @@ module ReadRequestFsm (
       end
 
       INTERPRET: begin
-        // TODO release IDs
-        // TODO ignore untaken ids
-        if (msg_type == T_REQUEST) begin
-          next_state = REPLY;
-          if (msg_action[1] == 1'b0) begin
-            // Trying to take off, and if fifo full, just deny.
-            if (takeoff_fifo_full) begin
-              send_divert = 1'b1;
-            end else begin
-              queue_takeoff_plane = 1'b1;
-              send_hold           = 1'b1;
+        if (msg_type == T_REQUEST) begin  // REQUEST
+          if (all_id[plane_id]) begin  // If ID is taken
+            next_state = REPLY;
+            if (msg_action[1] == 1'b0) begin
+              // Trying to take off, and if fifo full, just deny.
+              if (takeoff_fifo_full) begin
+                send_divert = 1'b1;
+              end else begin
+                queue_takeoff_plane = 1'b1;
+                send_hold           = 1'b1;
+              end
+            end else if (msg_action[1] == 1'b1) begin
+              // Trying to land, and if fifo full or emergency, just deny.
+              if (landing_fifo_full || emergency) begin
+                send_divert = 1'b1;
+              end else begin
+                queue_landing_plane = 1'b1;
+                send_hold           = 1'b1;
+              end
             end
-          end else if (msg_action[1] == 1'b1) begin
-            // Trying to land, and if fifo full or emergency, just deny.
-            if (landing_fifo_full || emergency) begin
-              send_divert = 1'b1;
-            end else begin
-              queue_landing_plane = 1'b1;
-              send_hold           = 1'b1;
-            end
+          end else begin  // ID is unknown, go straight to CHECK_QUEUES
+            next_state = CHECK_QUEUES;
           end
-        end else if (msg_type == T_DECLARE) begin
-          next_state = CHECK_QUEUES;
-          if (!msg_action[1]) begin
-            // Declaring take off
-            if (!msg_action[0]) begin
-              // Runway 0
-              unlock    = 1'b1;
-              runway_id = 1'b0;
-            end else if (msg_action[0]) begin
-              // Runway 1
-              unlock    = 1'b1;
-              runway_id = 1'b1;
+        end else if (msg_type == T_DECLARE) begin  // DECLARE
+          if (all_id[plane_id]) begin
+            next_state = CHECK_QUEUES;
+            release_id = 1'b1;  // Release ID
+            if (!msg_action[1]) begin
+              // Declaring take off
+              if (!msg_action[0]) begin
+                // Runway 0
+                unlock    = 1'b1;
+                runway_id = 1'b0;
+              end else if (msg_action[0]) begin
+                // Runway 1
+                unlock    = 1'b1;
+                runway_id = 1'b1;
+              end
+            end else if (msg_action[1]) begin
+              // Declaring landing
+              if (!msg_action[0]) begin
+                // Runway 0
+                unlock    = 1'b1;
+                runway_id = 1'b0;
+              end else if (msg_action[0]) begin
+                // Runway 1
+                unlock    = 1'b1;
+                runway_id = 1'b1;
+              end
             end
-          end else if (msg_action[1]) begin
-            // Declaring landing
-            if (!msg_action[0]) begin
-              // Runway 0
-              unlock    = 1'b1;
-              runway_id = 1'b0;
-            end else if (msg_action[0]) begin
-              // Runway 1
-              unlock    = 1'b1;
-              runway_id = 1'b1;
-            end
+          end else begin
+            next_state = CHECK_QUEUES;
           end
-        end else if (msg_type == T_EMERGENCY) begin
+        end else if (msg_type == T_EMERGENCY) begin  // EMERGENCY
           // Mayday shouldn't lock any runways but simply prevent
           // clearing of landings and takeoffs. It should send out
           // divertions to all landings.
@@ -383,9 +435,18 @@ module ReadRequestFsm (
             // Declare emergency
             set_emergency = 1'b1;
           end else if (msg_action == 2'b00) begin
-            next_state      = CHECK_QUEUES;
-            // Resolve emergency
-            unset_emergency = 1'b1;
+            next_state = CHECK_QUEUES;
+            // Resolve emergency only if the resolver is the original
+            if (emergency_id == plane_id) unset_emergency = 1'b1;
+          end
+        end else if (msg_type == T_ID_PLEASE) begin  // ID_PLEASE
+          // When full, send action bits 11 to invalidate ID
+          next_state = REPLY;
+          if (id_full) begin
+            send_invalid_id = 1'b1;
+          end else begin
+            send_valid_id = 1'b1;
+            take_id       = 1'b1;
           end
         end else begin
           // Message invalid (100 and above) say again
@@ -409,7 +470,7 @@ module ReadRequestFsm (
             next_state            = DIVERT_LANDING;
             unqueue_landing_plane = 1'b1;
           end else next_state = QUIET;
-        end else if (runway_active != 2'b11) begin // If runways aren't full
+        end else if (runway_active != 2'b11) begin  // If runways aren't full
           if (!takeoff_fifo_empty && !landing_fifo_empty) begin
             if (takeoff_first) begin
               next_state            = CLR_TAKEOFF;
@@ -544,7 +605,7 @@ endmodule : SendReplyFsm
 //
 module FIFO #(
     parameter int WIDTH = 9,
-              int DEPTH = 4
+    int DEPTH = 4
 ) (
     input  logic             clock,
     input  logic             reset,
@@ -602,7 +663,7 @@ endmodule : FIFO
 //
 module RunwayManager (
     input  logic       clock,
-    reset,
+    input  logic       reset,
     input  logic [3:0] plane_id,
     input  logic       runway_id,
     input  logic       lock,
@@ -650,14 +711,14 @@ endmodule : RunwayManager
 //  Keeps track of 16 IDs that can be assigned to aircraft entering the airspace
 //
 module AircraftIDManager (
-    input  logic        clock,
-    reset,
-    input  logic [ 3:0] id_in,
-    input  logic        release_id,
-    input  logic        take_id,
-    output logic [ 3:0] id_out,
-    output logic [15:0] all_id,
-    output logic        full
+    input  logic        clock,       //! Clock signal
+    input  logic        reset,       //! Reset signal
+    input  logic [ 3:0] id_in,       //! Incoming ID to release
+    input  logic        release_id,  //! Assert for one cycle to free id_in ID
+    input  logic        take_id,     //! Assert for one cycle to claim id_out ID
+    output logic [ 3:0] id_out,      //! ID that is currently available
+    output logic [15:0] all_id,      //! Vector indicates which IDs are taken
+    output logic        full         //! High if all IDs are taken
 );
 
   // TODO when a request is not made by ID in certain number of interpret
@@ -666,6 +727,7 @@ module AircraftIDManager (
   logic [15:0] taken_id;
   logic [ 3:0] id_avail;
 
+  assign all_id = taken_id;
   assign id_out = id_avail;  // always available
   assign full   = taken_id == 16'hFFFF;
 

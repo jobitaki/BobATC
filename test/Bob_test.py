@@ -35,17 +35,24 @@ async def send_uart_request(dut, data):
 def detect_uart_reply(dut, expected):
   reply = dut.uart_tx_data.value
   if dut.uart_tx_send == 0b1:
-    if (reply & 0b000011100) == 0b011 << 2:
+    if (reply & 0b000011100) == T_CLEAR << 2:
       if (reply & 0b000000010) == 0b00:
-        print(f"Bob     : Plane {"{:02d}".format(reply >> 5)} cleared to takeoff runway {reply & 0b1}")
+        print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} cleared to takeoff runway {reply & 0b1}")
       elif (reply & 0b000000010) == 0b10:
-        print(f"Bob     : Plane {"{:02d}".format(reply >> 5)} cleared to land runway {reply & 0b1}")
-    if (reply & 0b000011100) == 0b100 << 2:
-        print(f"Bob     : Plane {"{:02d}".format(reply >> 5)} hold")
+        print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} cleared to land runway {reply & 0b1}")
+    if (reply & 0b000011100) == T_HOLD << 2:
+      print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} hold")
+    if (reply & 0b000011100) == T_ID_PLEASE << 2:
+      if (reply & 0b000000011) == 0b00:
+        print(f"Bob      : ID {reply >> 5} is available")
+      elif (reply & 0b000000011) == 0b11:
+        print(f"Bob      : My airspace is full")
+    if (reply & 0b000011100) == T_DIVERT << 2:
+      print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} divert due to congestion")
         
-  return reply == expected
+  return (reply == expected, reply >> 5)
 
-@cocotb.test()
+# @cocotb.test()
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
@@ -62,18 +69,37 @@ async def basic_test(dut):
   await FallingEdge(dut.clock)
 
   dut.uart_tx_ready.value = True # UART always ready to transmit
+  
+  # Plane requests ID
+  id_1 = -1
+  await send_uart_request(dut, (T_ID_PLEASE << 2))
+  start = get_sim_time(units="ns")
+  print(f"New plane: Requesting ID for entry at time {start}")
+
+  while True:
+    await FallingEdge(dut.clock)
+    if get_sim_time(units="ns") - start > 10000:
+      raise TimeoutError("Did not receive ID")
+    detect = detect_uart_reply(dut, (T_ID_PLEASE << 2))
+    if detect[0]:
+      id_1 = detect[1]
+      print("")
+      print("////////////////////////////////////////")
+      print("// TB      : ID request success!      //")
+      print("////////////////////////////////////////\n")
+      break
+  await FallingEdge(dut.clock)
 
   # Plane id_1 requests takeoff
-  id_1 = (random.randint(0, 15) << 5)
-  await send_uart_request(dut, id_1 + (T_REQUEST << 2) + R_TAKEOFF)
+  await send_uart_request(dut, (id_1 << 5) + (T_REQUEST << 2) + R_TAKEOFF)
   start = get_sim_time(units="ns")
-  print(f"Plane {"{:02d}".format(id_1 >> 5)}: Requesting takeoff at time {start}")
+  print(f"Plane {"{:02d}".format(id_1)} : Requesting takeoff at time {start}")
 
   while True:
     await FallingEdge(dut.clock)
     if get_sim_time(units="ns") - start > 10000:
       raise TimeoutError("Did not receive clearance")
-    if detect_uart_reply(dut, id_1 + (T_CLEAR << 2) + C_TAKEOFF_0):
+    if detect_uart_reply(dut, (id_1 << 5) + (T_CLEAR << 2) + C_TAKEOFF_0)[0]:
       print("")
       print("////////////////////////////////////////")
       print("// TB      : Takeoff request success! //")
@@ -81,60 +107,116 @@ async def basic_test(dut):
       end = get_sim_time(units="ns")
       break
   await FallingEdge(dut.clock)
+  
+  # Plane requests ID
+  id_2 = -1
+  await send_uart_request(dut, (T_ID_PLEASE << 2))
+  start = get_sim_time(units="ns")
+  print(f"New plane: Requesting ID for entry at time {start}")
+
+  while True:
+    await FallingEdge(dut.clock)
+    if get_sim_time(units="ns") - start > 10000:
+      raise TimeoutError("Did not receive ID")
+    detect = detect_uart_reply(dut, (0b1 << 5) + (T_ID_PLEASE << 2))
+    if detect[0]:
+      id_2 = detect[1]
+      print("")
+      print("////////////////////////////////////////")
+      print("// TB      : ID request success!      //")
+      print("////////////////////////////////////////\n")
+      break
+  await FallingEdge(dut.clock)
 
   # Plane id_2 requests landing
-  id_2 = (random.randint(0, 15) << 5)
-  await send_uart_request(dut, id_2 + (T_REQUEST << 2) + R_LANDING)
+  await send_uart_request(dut, (id_2 << 5) + (T_REQUEST << 2) + R_LANDING)
   start = get_sim_time(units = "ns")
-  print(f"Plane {"{:02d}".format(id_2 >> 5)}: Requesting landing at time {start}")
+  print(f"Plane {"{:02d}".format(id_2)} : Requesting landing at time {start}")
   
   while True:
     await FallingEdge(dut.clock)
     if get_sim_time(units="ns") - start > 10000:
       raise TimeoutError("Did not receive clearance")
-    if detect_uart_reply(dut, id_2 + (T_CLEAR << 2) + C_LANDING_1):
+    if detect_uart_reply(dut, (id_2 << 5) + (T_CLEAR << 2) + C_LANDING_1)[0]:
       print("")
       print("////////////////////////////////////////")
       print("// TB      : Landing request success! //")
       print("////////////////////////////////////////\n")
-      end = get_sim_time(units="ns")
+      break
+  await FallingEdge(dut.clock)
+
+  # Plane requests ID
+  id_3 = -1
+  await send_uart_request(dut, (T_ID_PLEASE << 2))
+  start = get_sim_time(units="ns")
+  print(f"New plane: Requesting ID for entry at time {start}")
+
+  while True:
+    await FallingEdge(dut.clock)
+    if get_sim_time(units="ns") - start > 10000:
+      raise TimeoutError("Did not receive ID")
+    detect = detect_uart_reply(dut, (2 << 5) + (T_ID_PLEASE << 2))
+    if detect[0]:
+      id_3 = detect[1]
+      print("")
+      print("////////////////////////////////////////")
+      print("// TB      : ID request success!      //")
+      print("////////////////////////////////////////\n")
       break
   await FallingEdge(dut.clock)
 
   # Plane id_3 requests takeoff
-  id_3 = (random.randint(0, 15) << 5)
-  await send_uart_request(dut, id_3 + (T_REQUEST << 2) + R_TAKEOFF)
+  await send_uart_request(dut, (id_3 << 5) + (T_REQUEST << 2) + R_TAKEOFF)
   start = get_sim_time(units="ns")
-  print(f"Plane {"{:02d}".format(id_3 >> 5)}: Requesting takeoff at time {start}")
+  print(f"Plane {"{:02d}".format(id_3)} : Requesting takeoff at time {start}")
 
   while True:
     await FallingEdge(dut.clock)
     if get_sim_time(units="ns") - start > 10000:
       raise TimeoutError("Did not receive hold")
-    if detect_uart_reply(dut, id_3 + (T_HOLD << 2)):
+    if detect_uart_reply(dut, (id_3 << 5) + (T_HOLD << 2))[0]:
       print("")
       print("////////////////////////////////////////")
       print("// TB      : Received hold success!   //")
       print("////////////////////////////////////////\n")
-      end = get_sim_time(units="ns")
       break
   await FallingEdge(dut.clock)
 
   # Plane id_1 declares takeoff runway 0
-  await send_uart_request(dut, id_1 + (T_DECLARE << 2) + D_TAKEOFF_0)
+  await send_uart_request(dut, (id_1 << 5) + (T_DECLARE << 2) + D_TAKEOFF_0)
   start = get_sim_time(units="ns")
-  print(f"Plane {"{:02d}".format(id_1 >> 5)}: Declaring takeoff on runway 0 at time {start}")
+  print(f"Plane {"{:02d}".format(id_1)} : Declaring takeoff on runway 0 at time {start}")
 
   while True:
     await FallingEdge(dut.clock)
     if get_sim_time(units="ns") - start > 10000:
       raise TimeoutError("Did not receive takeoff clearance")
-    if detect_uart_reply(dut, id_3 + (T_CLEAR << 2) + C_TAKEOFF_0):
+    if detect_uart_reply(dut, (id_3 << 5) + (T_CLEAR << 2) + C_TAKEOFF_0)[0]:
       print("")
       print("////////////////////////////////////////")
       print("// TB      : Takeoff request success! //")
       print("////////////////////////////////////////\n")
       end = get_sim_time(units="ns")
+      break
+  await FallingEdge(dut.clock)
+
+  # Plane requests ID
+  id_4 = -1
+  await send_uart_request(dut, (T_ID_PLEASE << 2))
+  start = get_sim_time(units="ns")
+  print(f"New plane: Requesting ID for entry at time {start}")
+
+  while True:
+    await FallingEdge(dut.clock)
+    if get_sim_time(units="ns") - start > 10000:
+      raise TimeoutError("Did not receive ID")
+    detect = detect_uart_reply(dut, (0 << 5) + (T_ID_PLEASE << 2))
+    if detect[0]:
+      id_4 = detect[1]
+      print("")
+      print("////////////////////////////////////////")
+      print("// TB      : ID request success!      //")
+      print("////////////////////////////////////////\n")
       break
   await FallingEdge(dut.clock)
   await FallingEdge(dut.clock)
@@ -146,7 +228,7 @@ async def basic_test(dut):
 @cocotb.test()
 async def stress_test_takeoff(dut):
   print("////////////////////////////////////////")
-  print("//         Begin basic tests          //")
+  print("//     Begin takeoff stress tests     //")
   print("////////////////////////////////////////\n")
 
   # Run the clock
@@ -160,24 +242,46 @@ async def stress_test_takeoff(dut):
   await FallingEdge(dut.clock)
 
   dut.uart_tx_ready.value = True # UART always ready to transmit
+  id = []
+  for i in range(16):
+    # Plane requests ID
+    await send_uart_request(dut, (T_ID_PLEASE << 2))
+    start = get_sim_time(units="ns")
+    print(f"New plane: Requesting ID for entry at time {start}")
 
-  # Plane id_1 requests takeoff
-  id_1 = (random.randint(0, 15) << 5)
-  await send_uart_request(dut, id_1 + (T_REQUEST << 2) + R_TAKEOFF)
-  start = get_sim_time(units="ns")
-  print(f"Plane {"{:02d}".format(id_1 >> 5)}: Requesting takeoff at time {start}")
-
-  while True:
+    while True:
+      await FallingEdge(dut.clock)
+      if get_sim_time(units="ns") - start > 10000:
+        raise TimeoutError("Did not receive ID")
+      detect = detect_uart_reply(dut, (i << 5) + (T_ID_PLEASE << 2))
+      if detect[0]:
+        id.append(detect[1])
+        print("")
+        print("////////////////////////////////////////")
+        print("// TB      : ID request success!      //")
+        print("////////////////////////////////////////\n")
+        break
     await FallingEdge(dut.clock)
-    if get_sim_time(units="ns") - start > 10000:
-      raise TimeoutError("Did not receive clearance")
-    if detect_uart_reply(dut, id_1 + (T_CLEAR << 2) + C_TAKEOFF_0):
-      print("")
-      print("////////////////////////////////////////")
-      print("// TB      : Takeoff request success! //")
-      print("////////////////////////////////////////\n")
-      end = get_sim_time(units="ns")
-      break
-  await FallingEdge(dut.clock)
+  
+  assert dut.all_id.value == 0xFFFF
+  assert dut.id_full.value
+
+  for i in range(16):
+    # Plane requests takeoff
+    await send_uart_request(dut, (i << 5) + (T_REQUEST << 2) + R_TAKEOFF)
+    start = get_sim_time(units="ns")
+    print(f"Plane {"{:02d}".format(i)} : Requesting takeoff at time {start}")
+
+    while True:
+      await FallingEdge(dut.clock)
+      if get_sim_time(units="ns") - start > 10000:
+        raise TimeoutError("Did not receive hold")
+      if detect_uart_reply(dut, (i << 5) + (T_HOLD << 2))[0]:
+        print("")
+        print("////////////////////////////////////////")
+        print("// TB      : Received hold success!   //")
+        print("////////////////////////////////////////\n")
+        break
+    await FallingEdge(dut.clock)
 
   return 0
