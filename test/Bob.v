@@ -137,14 +137,21 @@ module Bob (
 		.empty(landing_fifo_empty)
 	);
 	wire [3:0] new_id;
+	reg [3:0] id_in;
+	wire sel_diverted_id;
 	wire take_id;
 	wire release_id;
 	wire id_full;
 	wire [15:0] all_id;
+	always @(*)
+		if (sel_diverted_id)
+			id_in = cleared_landing_id;
+		else
+			id_in = uart_request[8-:4];
 	AircraftIDManager id_manager(
 		.clock(clock),
 		.reset(reset),
-		.id_in(uart_request[8-:4]),
+		.id_in(id_in),
 		.release_id(release_id),
 		.take_id(take_id),
 		.id_out(new_id),
@@ -186,7 +193,8 @@ module Bob (
 		.unset_emergency(unset_emergency),
 		.take_id(take_id),
 		.release_id(release_id),
-		.sel_takeoff_id_lock(sel_takeoff_id_lock)
+		.sel_takeoff_id_lock(sel_takeoff_id_lock),
+		.sel_diverted_id(sel_diverted_id)
 	);
 	always @(posedge clock)
 		if (reset)
@@ -316,7 +324,8 @@ module ReadRequestFsm (
 	unset_emergency,
 	take_id,
 	release_id,
-	sel_takeoff_id_lock
+	sel_takeoff_id_lock,
+	sel_diverted_id
 );
 	input wire clock;
 	input wire reset;
@@ -353,6 +362,7 @@ module ReadRequestFsm (
 	output reg take_id;
 	output reg release_id;
 	output reg sel_takeoff_id_lock;
+	output reg sel_diverted_id;
 	wire [3:0] plane_id;
 	wire [2:0] msg_type;
 	wire [1:0] msg_action;
@@ -384,6 +394,7 @@ module ReadRequestFsm (
 		take_id = 1'b0;
 		release_id = 1'b0;
 		sel_takeoff_id_lock = 1'b0;
+		sel_diverted_id = 1'b0;
 		case (state)
 			3'b000:
 				if (uart_empty) begin
@@ -429,16 +440,20 @@ module ReadRequestFsm (
 					if (all_id[plane_id]) begin
 						next_state = 3'b010;
 						if (msg_action[1] == 1'b0) begin
-							if (takeoff_fifo_full)
+							if (takeoff_fifo_full) begin
 								send_divert = 1'b1;
+								release_id = 1'b1;
+							end
 							else begin
 								queue_takeoff_plane = 1'b1;
 								send_hold = 1'b1;
 							end
 						end
 						else if (msg_action[1] == 1'b1) begin
-							if (landing_fifo_full || emergency)
+							if (landing_fifo_full || emergency) begin
 								send_divert = 1'b1;
+								release_id = 1'b1;
+							end
 							else begin
 								queue_landing_plane = 1'b1;
 								send_hold = 1'b1;
@@ -575,6 +590,8 @@ module ReadRequestFsm (
 			3'b110: begin
 				next_state = 3'b111;
 				send_divert_landing = 1'b1;
+				sel_diverted_id = 1'b1;
+				release_id = 1'b1;
 			end
 			3'b111: begin
 				next_state = 3'b000;
@@ -1115,40 +1132,4 @@ module BaudRateGenerator (
 			clockCount <= 1'sb0;
 		else
 			clockCount <= clockCount + 1'b1;
-endmodule
-module baud_rate_generator_tb;
-	reg clock;
-	reg reset;
-	reg start_rx;
-	wire start_tx;
-	wire tick;
-	baud_rate_generator dut(.*);
-	initial begin
-		clock = 0;
-		forever #(1) clock = ~clock;
-	end
-	initial begin
-		start_rx = 0;
-		reset <= 1'b1;
-		@(posedge clock)
-			;
-		reset <= 1'b0;
-		begin : sv2v_autoblock_1
-			reg signed [31:0] i;
-			for (i = 0; i < 1000; i = i + 1)
-				@(posedge clock)
-					;
-		end
-		start_rx <= 1'b1;
-		@(posedge clock)
-			;
-		start_rx <= 1'b0;
-		begin : sv2v_autoblock_2
-			reg signed [31:0] i;
-			for (i = 0; i < 1000; i = i + 1)
-				@(posedge clock)
-					;
-		end
-		$finish;
-	end
 endmodule

@@ -157,15 +157,20 @@ module Bob (
   // ID Manager //
   ////////////////
 
-  logic [3:0] new_id;
+  logic [3:0] new_id, id_in;
+  logic sel_diverted_id;
   logic take_id, release_id;
   logic id_full;
   logic [15:0] all_id;
 
+  always_comb
+    if (sel_diverted_id) id_in = cleared_landing_id;
+    else id_in = uart_request.plane_id;
+
   AircraftIDManager id_manager (
       .clock(clock),
       .reset(reset),
-      .id_in(uart_request.plane_id),
+      .id_in(id_in),
       .release_id(release_id),
       .take_id(take_id),
       .id_out(new_id),
@@ -316,7 +321,8 @@ module ReadRequestFsm (
     output logic        unset_emergency,
     output logic        take_id,
     output logic        release_id,
-    output logic        sel_takeoff_id_lock
+    output logic        sel_takeoff_id_lock,
+    output logic        sel_diverted_id
 );
 
   logic      [3:0] plane_id;
@@ -363,6 +369,7 @@ module ReadRequestFsm (
     take_id               = 1'b0;
     release_id            = 1'b0;
     sel_takeoff_id_lock   = 1'b0;
+    sel_diverted_id       = 1'b0;
 
     case (state)
       QUIET: begin
@@ -407,6 +414,7 @@ module ReadRequestFsm (
               // Trying to take off, and if fifo full, just deny.
               if (takeoff_fifo_full) begin
                 send_divert = 1'b1;
+                release_id  = 1'b1;
               end else begin
                 queue_takeoff_plane = 1'b1;
                 send_hold           = 1'b1;
@@ -415,6 +423,7 @@ module ReadRequestFsm (
               // Trying to land, and if fifo full or emergency, just deny.
               if (landing_fifo_full || emergency) begin
                 send_divert = 1'b1;
+                release_id  = 1'b1;
               end else begin
                 queue_landing_plane = 1'b1;
                 send_hold           = 1'b1;
@@ -451,6 +460,7 @@ module ReadRequestFsm (
               end
             end
           end else begin
+            // Invalid plane ID
             next_state = CHECK_QUEUES;
           end
         end else if (msg_type == T_EMERGENCY) begin  // EMERGENCY
@@ -461,7 +471,7 @@ module ReadRequestFsm (
           // It will not send out a special message of any kind
           if (msg_action == 2'b01) begin
             if (!landing_fifo_empty) begin
-              next_state = DIVERT_LANDING;  // Divert all landings
+              next_state            = DIVERT_LANDING;  // Divert all landings
               unqueue_landing_plane = 1'b1;
             end else next_state = QUIET;
             // Declare emergency
@@ -470,6 +480,8 @@ module ReadRequestFsm (
             next_state = CHECK_QUEUES;
             // Resolve emergency only if the resolver is the original
             if (emergency_id == plane_id) unset_emergency = 1'b1;
+            // Also release ID
+            release_id = 1'b1;
           end
         end else if (msg_type == T_ID_PLEASE) begin  // ID_PLEASE
           // When full, send action bits 11 to invalidate ID
@@ -557,6 +569,8 @@ module ReadRequestFsm (
       DIVERT_LANDING: begin
         next_state          = QUEUE_CLR;
         send_divert_landing = 1'b1;
+        sel_diverted_id     = 1'b1;
+        release_id          = 1'b1;
       end
 
       QUEUE_CLR: begin

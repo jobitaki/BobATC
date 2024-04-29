@@ -25,34 +25,3 @@ module BaudRateGenerator #(
     else clockCount <= clockCount + 1'b1;
 
 endmodule : BaudRateGenerator
-
-module baud_rate_generator_tb ();
-  logic clock, reset;
-  logic start_rx;
-  logic start_tx;
-  logic tick;
-
-  baud_rate_generator dut (.*);
-
-  initial begin
-    clock = 0;
-    forever #1 clock = ~clock;
-  end
-
-  initial begin
-    // $monitor("clockCount %b", dut.clockCount,, "tick %b", tick);
-  end
-
-  initial begin
-    start_rx = 0;
-    reset <= 1'b1;
-    @(posedge clock);
-    reset <= 1'b0;
-    for (int i = 0; i < 1000; i++) @(posedge clock);
-    start_rx <= 1'b1;
-    @(posedge clock);
-    start_rx <= 1'b0;
-    for (int i = 0; i < 1000; i++) @(posedge clock);
-    $finish;
-  end
-endmodule : baud_rate_generator_tb

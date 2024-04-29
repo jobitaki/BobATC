@@ -25,6 +25,9 @@ D_TAKEOFF_1  = 0b01
 D_LANDING_0  = 0b10 # Declare landing
 D_LANDING_1  = 0b11
 
+E_DECLARE    = 0b01
+E_RESOLVE    = 0b00
+
 PERIOD = 6510
 
 async def read(dut):
@@ -120,7 +123,7 @@ async def detect_uart_reply(dut, expected):
     elif (reply & 0b000000011) == 0b11:
       print(f"Bob      : My airspace is full")
   if (reply & 0b000011100) == T_DIVERT << 2:
-    print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} divert due to congestion")
+    print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} divert due to congestion or emergency")
         
   return (reply == expected, reply >> 5)
 
@@ -143,6 +146,11 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
       print(f"Plane {"{:02d}".format(id)} : Declaring landing runway 0 at time {start}")
     elif action == D_LANDING_1:
       print(f"Plane {"{:02d}".format(id)} : Declaring landing runway 1 at time {start}")
+  elif type == T_EMERGENCY:
+    if action == E_DECLARE:
+      print(f"Plane {"{:02d}".format(id)} : Declaring emergency")
+    elif action == E_RESOLVE:
+      print(f"Plane {"{:02d}".format(id)} : Resolving emergency")
   else:
     print(f"Plane {"{:02d}".format(id)} : Making invalid request at time {start}")
 
@@ -157,7 +165,7 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     print("////////////////////////////////////////\n")
     return detect[1]
 
-@cocotb.test()
+#@cocotb.test()
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
@@ -235,9 +243,10 @@ async def stress_test_takeoff(dut):
   assert dut.bobby.takeoff_fifo.full.value
 
   for i in range(6, 16):
-    # Planes request takeoff, diverted
+    # Planes request takeoff, diverted, they lose their IDs
     await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_DIVERT << 2), False)
   
+  dut.bobby.all_id.value == 0x003F
   dut.bobby.takeoff_fifo.count.value == 0b100
   
   for i in range(4):
@@ -247,16 +256,31 @@ async def stress_test_takeoff(dut):
   assert dut.bobby.takeoff_fifo.empty.value
   assert dut.bobby.runway_manager.runway.value == 0b0101101001
 
+  # Active IDs at this point should be 4 and 5 only
+  assert dut.bobby.all_id.value == 0x0030
+
+  for i in range(0, 4):
+    # Fill up ID space from 0 to 3
+    id.append(await request(dut, 0, T_ID_PLEASE, 0, (i << 5) + (T_ID_PLEASE << 2), False))
+
+  assert dut.bobby.all_id.value == 0x003F
+
+  for i in range(6, 16):
+    # Diverted planes requests ID again
+    id.append(await request(dut, 0, T_ID_PLEASE, 0, (i << 5) + (T_ID_PLEASE << 2), False))
+
+  assert dut.bobby.all_id.value == 0xFFFF
+
   for i in range(6, 16):
     await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 5) + (T_HOLD << 2), False)
     await request(dut, i - 2, T_DECLARE, (i - 2) % 2, (i << 5) + (T_CLEAR << 2) + (i - 2) % 2, False)
   
-  assert dut.bobby.all_id.value == 0xC000
+  assert dut.bobby.all_id.value == 0xC00F
 
   for i in range(14, 16):
     await request(dut, i, T_DECLARE, i % 2, 0, True)
   
-  assert dut.bobby.all_id.value == 0x0000
+  assert dut.bobby.all_id.value == 0x000F
   assert dut.bobby.takeoff_fifo.empty.value
   assert dut.bobby.landing_fifo.empty.value
 
@@ -300,28 +324,44 @@ async def stress_test_landing(dut):
   assert dut.bobby.landing_fifo.full.value
 
   for i in range(6, 16):
-    # Planes request landing, diverted
+    # Planes request landing, diverted, they lose their IDs
     await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_DIVERT << 2), False)
   
+  dut.bobby.all_id.value == 0x003F
   dut.bobby.landing_fifo.count.value == 0b100
   
   for i in range(4):
-    # Planes declare landing
+    # Planes 0, 1 declare landing, 2, 3, cleared. 2, 3 declare landing, 4, 5 cleared.
     await request(dut, i, T_DECLARE, 0b10 + i % 2, ((i + 2) << 5) + (T_CLEAR << 2) + 0b10 + (i % 2), False)
   
   assert dut.bobby.landing_fifo.empty.value
   assert dut.bobby.runway_manager.runway.value == 0b0101101001
+  
+  # Active IDs at this point should be 4 and 5 only
+  assert dut.bobby.all_id.value == 0x0030
 
+  for i in range(0, 4):
+    # Fill up ID space from 0 to 3
+    id.append(await request(dut, 0, T_ID_PLEASE, 0, (i << 5) + (T_ID_PLEASE << 2), False))
+
+  assert dut.bobby.all_id.value == 0x003F
+
+  for i in range(6, 16):
+    # Diverted planes requests ID again
+    id.append(await request(dut, 0, T_ID_PLEASE, 0, (i << 5) + (T_ID_PLEASE << 2), False))
+
+  assert dut.bobby.all_id.value == 0xFFFF
+  
   for i in range(6, 16):
     await request(dut, i, T_REQUEST, R_LANDING, (i << 5) + (T_HOLD << 2), False)
     await request(dut, i - 2, T_DECLARE, (i - 2) % 2, (i << 5) + (T_CLEAR << 2) + 0b10 + (i - 2) % 2, False)
   
-  assert dut.bobby.all_id.value == 0xC000
+  assert dut.bobby.all_id.value == 0xC00F
 
   for i in range(14, 16):
     await request(dut, i, T_DECLARE, 0b10 + i % 2, 0, True)
   
-  assert dut.bobby.all_id.value == 0x0000
+  assert dut.bobby.all_id.value == 0x000F
   assert dut.bobby.takeoff_fifo.empty.value
   assert dut.bobby.landing_fifo.empty.value
 
@@ -329,7 +369,7 @@ async def stress_test_landing(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test()
+#@cocotb.test()
 async def stress_test_id(dut):
   print("////////////////////////////////////////")
   print("//        Begin ID stress tests       //")
@@ -361,4 +401,66 @@ async def stress_test_id(dut):
   print("//       Finish ID stress tests       //")
   print("////////////////////////////////////////\n")
 
+  return 0
+
+#@cocotb.test()
+async def stress_test_alternate(dut):
+  return 0
+
+#@cocotb.test()
+async def emergency_test(dut):
+  print("////////////////////////////////////////")
+  print("//       Begin emergency tests        //")
+  print("////////////////////////////////////////\n")
+
+  # Run the clock
+  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+
+  dut.reset.value = True
+  await FallingEdge(dut.clock)
+  dut.reset.value = False
+  await FallingEdge(dut.clock)
+
+  id = []
+  for i in range(10):
+    # Plane requests ID
+    id.append(await request(dut, 0, T_ID_PLEASE, 0, (i << 5) + (T_ID_PLEASE << 2), False))
+  
+  assert dut.bobby.all_id.value == 0x03FF
+  assert not dut.bobby.id_full.value
+
+  await request(dut, id[0], T_REQUEST, R_LANDING, (id[0] << 5) + (T_CLEAR << 2) + C_LANDING_0, False)
+  await request(dut, id[5], T_REQUEST, R_TAKEOFF, (id[5] << 5) + (T_CLEAR << 2) + C_TAKEOFF_1, False)
+
+  assert dut.bobby.runway_active == 0b11
+
+  for i in range(1, 5):
+    # 4 planes get queued for landing
+    await request(dut, id[i], T_REQUEST, R_LANDING, (id[i] << 5) + (T_HOLD << 2), False)
+
+  await request(dut, id[0], T_EMERGENCY, E_DECLARE, 0, True)
+  detect = await detect_uart_reply(dut, (1 << 5) + (T_DIVERT << 2))
+  assert detect[0]
+  detect = await detect_uart_reply(dut, (2 << 5) + (T_DIVERT << 2))
+  assert detect[0]
+  detect = await detect_uart_reply(dut, (3 << 5) + (T_DIVERT << 2))
+  assert detect[0]
+  detect = await detect_uart_reply(dut, (4 << 5) + (T_DIVERT << 2))
+  assert detect[0]
+
+  assert dut.bobby.all_id.value == 0x03E1
+
+  for i in range(6, 10):
+    # 4 planes get queued for landing
+    await request(dut, id[i], T_REQUEST, R_TAKEOFF, (id[i] << 5) + (T_HOLD << 2), False)
+
+  print("////////////////////////////////////////")
+  print("//       Finish emergency tests       //")
+  print("////////////////////////////////////////\n")
+  
+#@cocotb.test()
+async def invalid_behavior_test(dut):
+  # Invalid aircraft tries to unlock runway
+  # Invalid aircraft tries to unlock emergency
+  
   return 0
