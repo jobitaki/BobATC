@@ -12,23 +12,20 @@ T_SAY_AGAIN  = 0b101
 T_DIVERT     = 0b110
 T_ID_PLEASE  = 0b111
 
-C_TAKEOFF_0   = 0b00 # Clear takeoff
-C_TAKEOFF_1   = 0b01
-C_LANDING_0   = 0b10 # Clear landing
-C_LANDING_1   = 0b11
+C_RUNWAY_0   = 0b0 # Cleared
+C_RUNWAY_1   = 0b1
 
-R_TAKEOFF    = 0b00 # Request
-R_LANDING    = 0b10
+R_TAKEOFF    = 0b0 # Request
+R_LANDING    = 0b1
 
-D_TAKEOFF_0  = 0b00 # Declare takeoff
-D_TAKEOFF_1  = 0b01
-D_LANDING_0  = 0b10 # Declare landing
-D_LANDING_1  = 0b11
+D_RUNWAY_0  = 0b0 # Declare
+D_RUNWAY_1  = 0b1
 
-E_DECLARE    = 0b01
-E_RESOLVE    = 0b00
+E_DECLARE    = 0b1
+E_RESOLVE    = 0b0
 
 PERIOD = 6510
+CLOCK_PERIOD = 200
 
 async def read(dut):
   data = 0b000000000
@@ -165,14 +162,14 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     print("////////////////////////////////////////\n")
     return detect[1]
 
-#@cocotb.test()
+@cocotb.test(skip=True)
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
   print("////////////////////////////////////////\n")
 
   # Run the clock
-  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -207,14 +204,14 @@ async def basic_test(dut):
   print("//         Finish basic tests         //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test()
+@cocotb.test(skip=False)
 async def stress_test_takeoff(dut):
   print("////////////////////////////////////////")
   print("//     Begin takeoff stress tests     //")
   print("////////////////////////////////////////\n")
 
   # Run the clock
-  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -288,14 +285,14 @@ async def stress_test_takeoff(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test()
+@cocotb.test(skip=True)
 async def stress_test_landing(dut):
   print("////////////////////////////////////////")
   print("//     Begin landing stress tests     //")
   print("////////////////////////////////////////\n")
 
   # Run the clock
-  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -369,14 +366,14 @@ async def stress_test_landing(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-#@cocotb.test()
+@cocotb.test(skip=True)
 async def stress_test_id(dut):
   print("////////////////////////////////////////")
   print("//        Begin ID stress tests       //")
   print("////////////////////////////////////////\n")
 
   # Run the clock
-  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -403,18 +400,19 @@ async def stress_test_id(dut):
 
   return 0
 
-#@cocotb.test()
+@cocotb.test(skip=True)
 async def stress_test_alternate(dut):
+  # Queue up both landing and takeoff FIFOs
   return 0
 
-#@cocotb.test()
+@cocotb.test(skip=True)
 async def emergency_test(dut):
   print("////////////////////////////////////////")
   print("//       Begin emergency tests        //")
   print("////////////////////////////////////////\n")
 
   # Run the clock
-  cocotb.start_soon(Clock(dut.clock, 40, units="ns").start())
+  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -453,12 +451,21 @@ async def emergency_test(dut):
   for i in range(6, 10):
     # 4 planes get queued for landing
     await request(dut, id[i], T_REQUEST, R_TAKEOFF, (id[i] << 5) + (T_HOLD << 2), False)
+  
+  # Invalid resolving plane ID
+  await request(dut, id[1], T_EMERGENCY, E_RESOLVE, 0, True)
+
+  assert dut.bobby.emergency.value
+
+  await request(dut, id[0], T_EMERGENCY, E_RESOLVE, 0, True)
+  
+  assert not dut.bobby.emergency.value
 
   print("////////////////////////////////////////")
   print("//       Finish emergency tests       //")
   print("////////////////////////////////////////\n")
   
-#@cocotb.test()
+@cocotb.test(skip=True)
 async def invalid_behavior_test(dut):
   # Invalid aircraft tries to unlock runway
   # Invalid aircraft tries to unlock emergency
