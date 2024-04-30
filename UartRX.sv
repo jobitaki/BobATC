@@ -6,15 +6,15 @@ module UartRX (
     input  logic       rx,            // Serial data input line
     output logic [7:0] data,          // Data received
     output logic       done,          // High if data is fully received
-    output logic       framing_error
+    output logic       framing_error,
+    output logic       receiving
 );
 
   logic start, tick;
 
   BaudRateGenerator #(
       .CLK_HZ(25_000_000),
-      .BAUD_RATE(9600),
-      .SAMPLE_RATE(16)
+      .BAUD_RATE(9600)
   ) conductor (
       .clock(clock),
       .reset(reset),
@@ -53,7 +53,8 @@ module UartRX (
       .en_data_counter(en_data_counter),
       .clear_data_counter(clear_data_counter),
       .framing_error(framing_error),
-      .done(done)
+      .done(done),
+      .receiving(receiving)
   );
 
 endmodule : UartRX
@@ -69,7 +70,8 @@ module UartRXFsm (
     output logic en_data_counter,
     output logic clear_data_counter,
     output logic framing_error,
-    output logic done
+    output logic done,
+    output logic receiving
 );
 
   typedef enum logic [1:0] {
@@ -88,6 +90,7 @@ module UartRXFsm (
     clear_data_counter = 1'b0;
     framing_error      = 1'b0;
     done               = 1'b0;
+    receiving          = 1'b0;
     next_state         = IDLE;
 
     case (state)
@@ -120,7 +123,10 @@ module UartRXFsm (
             clear_data_counter = 1'b1;
             done               = 1'b1;
           end
+        end else begin
+          next_state = DATA;
         end
+        receiving = 1'b1;
       end
 
       FRAMING_ERROR: begin

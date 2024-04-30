@@ -1,7 +1,7 @@
 `default_nettype none
 module BobTop (
 	clock,
-	reset,
+	reset_n,
 	rx,
 	tx,
 	framing_error,
@@ -10,7 +10,7 @@ module BobTop (
 	ready
 );
 	input wire clock;
-	input wire reset;
+	input wire reset_n;
 	input wire rx;
 	output wire tx;
 	output wire framing_error;
@@ -22,10 +22,9 @@ module BobTop (
 	wire uart_rx_valid;
 	wire uart_tx_ready;
 	wire uart_tx_send;
-	assign ready = uart_tx_ready;
 	UartRX receiver(
 		.clock(clock),
-		.reset(reset),
+		.reset(~reset_n),
 		.rx(rx),
 		.data(uart_rx_data),
 		.done(uart_rx_valid),
@@ -34,7 +33,7 @@ module BobTop (
 	);
 	UartTX transmitter(
 		.clock(clock),
-		.reset(reset),
+		.reset(~reset_n),
 		.send(uart_tx_send),
 		.data(uart_tx_data),
 		.tx(tx),
@@ -42,7 +41,7 @@ module BobTop (
 	);
 	Bob bobby(
 		.clock(clock),
-		.reset(reset),
+		.reset(~reset_n),
 		.uart_rx_data(uart_rx_data),
 		.uart_rx_valid(uart_rx_valid),
 		.uart_tx_data(uart_tx_data),
@@ -131,7 +130,7 @@ module Bob (
 	);
 	FIFO #(
 		.WIDTH(4),
-		.DEPTH(16)
+		.DEPTH(8)
 	) landing_fifo(
 		.clock(clock),
 		.reset(reset),

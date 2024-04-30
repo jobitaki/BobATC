@@ -18,6 +18,6 @@ package BobATC;
   typedef struct packed {
     logic [3:0] plane_id;
     msg_type_t  msg_type;
-    logic [1:0] msg_action;
+    logic msg_action;
   } msg_t;
 endpackage;

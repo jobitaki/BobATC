@@ -6,15 +6,15 @@ module UartTX (
     input  logic       send,   // High to send data
     input  logic [7:0] data,   // Data to send
     output logic       tx,     // Serial data output line
-    output logic       ready   // High if TX is not busy
+    output logic       ready,  // High if TX is not busy
+    output logic       sending // High when sending a packet
 );
 
   logic start, tick;
 
   BaudRateGenerator #(
       .CLK_HZ(25_000_000),
-      .BAUD_RATE(9600),
-      .SAMPLE_RATE(16)
+      .BAUD_RATE(9600)
   ) conductor (
       .clock(clock),
       .reset(reset),
@@ -69,7 +69,8 @@ module UartTX (
       .send_stop_bit(send_stop_bit),
       .en_data_counter(en_data_counter),
       .clear_data_counter(clear_data_counter),
-      .ready(ready)
+      .ready(ready),
+      .sending(sending)
   );
 
 endmodule : UartTX
@@ -86,7 +87,8 @@ module UartTXFsm (
     output logic send_stop_bit,
     output logic en_data_counter,
     output logic clear_data_counter,
-    output logic ready
+    output logic ready,
+    output logic sending
 );
 
   typedef enum logic [1:0] {
@@ -106,6 +108,7 @@ module UartTXFsm (
     en_data_counter    = 1'b0;
     clear_data_counter = 1'b0;
     ready              = 1'b0;
+    sending            = 1'b0;
     next_state         = IDLE;
 
     case (state)
@@ -129,6 +132,7 @@ module UartTXFsm (
           next_state     = START;
           send_start_bit = 1'b1;
         end
+        sending = 1'b1;
       end
 
       SEND: begin
@@ -141,6 +145,7 @@ module UartTXFsm (
           send_data       = 1'b1;
           en_data_counter = 1'b1;
         end
+        sending = 1'b1;
       end
 
       STOP: begin
@@ -151,6 +156,7 @@ module UartTXFsm (
           next_state    = STOP;
           send_stop_bit = 1'b1;
         end
+        sending = 1'b1;
       end
 
       default: next_state = IDLE;

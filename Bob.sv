@@ -14,7 +14,10 @@ module BobTop (
     input  logic       rx,
     output logic       tx,
     output logic       framing_error,
-    output logic [1:0] runway_active
+    output logic [1:0] runway_active,
+    output logic       emergency,
+    output logic       receiving,
+    output logic       sending
 );
 
   logic [7:0] uart_rx_data, uart_tx_data;
@@ -28,7 +31,8 @@ module BobTop (
       .rx(rx),
       .data(uart_rx_data),
       .done(uart_rx_valid),
-      .framing_error(framing_error)
+      .framing_error(framing_error),
+      .receiving(receiving)
   );
 
   UartTX transmitter (
@@ -37,7 +41,8 @@ module BobTop (
       .send(uart_tx_send),
       .data(uart_tx_data),
       .tx(tx),
-      .ready(uart_tx_ready)
+      .ready(uart_tx_ready),
+      .sending(sending)
   );
 
   Bob bobby (
@@ -48,7 +53,8 @@ module BobTop (
       .uart_tx_data(uart_tx_data),
       .uart_tx_ready(uart_tx_ready),
       .uart_tx_send(uart_tx_send),
-      .runway_active(runway_active)
+      .runway_active(runway_active),
+      .emergency(emergency)
   );
 
 endmodule : BobTop
@@ -61,7 +67,8 @@ module Bob (
     output logic [7:0] uart_tx_data,   // Data to write to UART
     input  logic       uart_tx_ready,  // High if ready to write to UART
     output logic       uart_tx_send,   // High if data is ready for transmit
-    output logic [1:0] runway_active   // Tracks runway status
+    output logic [1:0] runway_active,  // Tracks runway status
+    output logic       emergency
 );
 
   // For UART Request Storage FIFO
@@ -141,7 +148,7 @@ module Bob (
 
   FIFO #(
       .WIDTH(4),
-      .DEPTH(8)
+      .DEPTH(8)   // Limited to 8 for chip size and congestion
   ) landing_fifo (
       .clock(clock),
       .reset(reset),
@@ -206,27 +213,27 @@ module Bob (
     end else if (send_hold) begin
       reply_to_send.plane_id   <= uart_request.plane_id;
       reply_to_send.msg_type   <= T_HOLD;
-      reply_to_send.msg_action <= 2'b0;
+      reply_to_send.msg_action <= 1'b0;
     end else if (send_say_ag) begin
       reply_to_send.plane_id   <= uart_request.plane_id;
       reply_to_send.msg_type   <= T_SAY_AGAIN;
-      reply_to_send.msg_action <= 2'b0;
+      reply_to_send.msg_action <= 1'b0;
     end else if (send_divert) begin
       reply_to_send.plane_id   <= uart_request.plane_id;
       reply_to_send.msg_type   <= T_DIVERT;
-      reply_to_send.msg_action <= 2'b0;
+      reply_to_send.msg_action <= 1'b0;
     end else if (send_divert_landing) begin
       reply_to_send.plane_id   <= cleared_landing_id;
       reply_to_send.msg_type   <= T_DIVERT;
-      reply_to_send.msg_action <= 2'b0;
+      reply_to_send.msg_action <= 1'b0;
     end else if (send_invalid_id) begin
       reply_to_send.plane_id   <= 4'd0;
       reply_to_send.msg_type   <= T_ID_PLEASE;
-      reply_to_send.msg_action <= 2'b1;
+      reply_to_send.msg_action <= 1'b1;
     end else if (send_valid_id) begin
       reply_to_send.plane_id   <= new_id;
       reply_to_send.msg_type   <= T_ID_PLEASE;
-      reply_to_send.msg_action <= 2'b0;
+      reply_to_send.msg_action <= 1'b0;
     end
   end
 

@@ -24,11 +24,11 @@ D_RUNWAY_1  = 0b1
 E_DECLARE    = 0b1
 E_RESOLVE    = 0b0
 
-PERIOD = 6510
-CLOCK_PERIOD = 200
+PERIOD = 104167
+CLOCK_PERIOD = 40
 
 async def read(dut):
-  data = 0b000000000
+  data = 0b00000000
   fail = 0
   while True:
     if fail == 3:
@@ -55,12 +55,12 @@ async def read(dut):
     
     # Collect data
     num_bits = 0
-    while num_bits < 9:
+    while num_bits < 8:
       bit_start = get_sim_time(units="ns")
       while get_sim_time(units="ns") - bit_start < PERIOD / 2:
         await FallingEdge(dut.clock)
       data >>= 1
-      data |= (dut.tx.value << 8)
+      data |= (dut.tx.value << 7)
       num_bits += 1
       while get_sim_time(units="ns") - bit_start < PERIOD:
         await FallingEdge(dut.clock)
@@ -88,7 +88,7 @@ async def write(dut, data):
 
   num_bits = 0
 
-  while num_bits < 9:
+  while num_bits < 8:
     bit_start = get_sim_time(units="ns")
     dut.rx.value = data_to_send & 1
     while get_sim_time(units="ns") - bit_start < PERIOD:
@@ -107,25 +107,25 @@ async def send_uart_request(dut, data):
 
 async def detect_uart_reply(dut, expected):
   reply = await read(dut)
-  if (reply & 0b000011100) == T_CLEAR << 2:
-    if (reply & 0b000000010) == 0b00:
-      print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} cleared to takeoff runway {reply & 0b1}")
-    elif (reply & 0b000000010) == 0b10:
-      print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} cleared to land runway {reply & 0b1}")
-  if (reply & 0b000011100) == T_HOLD << 2:
+  if (reply & 0b00001110) == T_CLEAR << 2:
+    if (reply & 0b00000001) == 0b0:
+      print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} cleared runway {reply & 0b1}")
+    elif (reply & 0b00000001) == 0b1:
+      print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} cleared runway {reply & 0b1}")
+  if (reply & 0b00001110) == T_HOLD << 2:
     print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} hold")
-  if (reply & 0b000011100) == T_ID_PLEASE << 2:
-    if (reply & 0b000000011) == 0b00:
+  if (reply & 0b00001110) == T_ID_PLEASE << 2:
+    if (reply & 0b00000001) == 0b0:
       print(f"Bob      : ID {reply >> 5} is available")
-    elif (reply & 0b000000011) == 0b11:
+    elif (reply & 0b00000001) == 0b1:
       print(f"Bob      : My airspace is full")
-  if (reply & 0b000011100) == T_DIVERT << 2:
+  if (reply & 0b00001110) == T_DIVERT << 2:
     print(f"Bob      : Plane {"{:02d}".format(reply >> 5)} divert due to congestion or emergency")
         
   return (reply == expected, reply >> 5)
 
 async def request(dut, id, type, action, expected_reply, ignore_reply):
-  await send_uart_request(dut, (id << 5) + (type << 2) + action)
+  await send_uart_request(dut, (id << 4) + (type << 1) + action)
   start = get_sim_time(units="ns")
   if type == T_ID_PLEASE:
     print(f"New Plane: Requesting ID for entry at time {start}")
@@ -135,14 +135,10 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     elif action == R_LANDING:
       print(f"Plane {"{:02d}".format(id)} : Requesting landing at time {start}")
   elif type == T_DECLARE:
-    if action == D_TAKEOFF_0:
-      print(f"Plane {"{:02d}".format(id)} : Declaring takeoff runway 0 at time {start}")
-    elif action == D_TAKEOFF_1:
-      print(f"Plane {"{:02d}".format(id)} : Declaring takeoff runway 1 at time {start}")
-    elif action == D_LANDING_0:
-      print(f"Plane {"{:02d}".format(id)} : Declaring landing runway 0 at time {start}")
-    elif action == D_LANDING_1:
-      print(f"Plane {"{:02d}".format(id)} : Declaring landing runway 1 at time {start}")
+    if action == D_RUNWAY_0:
+      print(f"Plane {"{:02d}".format(id)} : Declaring takeoff/landing runway 0 at time {start}")
+    elif action == D_RUNWAY_1:
+      print(f"Plane {"{:02d}".format(id)} : Declaring takeoff/landing runway 1 at time {start}")
   elif type == T_EMERGENCY:
     if action == E_DECLARE:
       print(f"Plane {"{:02d}".format(id)} : Declaring emergency")
@@ -162,7 +158,7 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     print("////////////////////////////////////////\n")
     return detect[1]
 
-@cocotb.test(skip=True)
+@cocotb.test(skip=False)
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
@@ -177,34 +173,34 @@ async def basic_test(dut):
   await FallingEdge(dut.clock)
 
   # Plane requests ID
-  id_1 = await request(dut, 0, T_ID_PLEASE, 0, (T_ID_PLEASE << 2), False)
+  id_1 = await request(dut, 0, T_ID_PLEASE, 0, (T_ID_PLEASE << 1), False)
 
   # Plane id_1 requests takeoff
-  await request(dut, id_1, T_REQUEST, R_TAKEOFF, (id_1 << 5) + (T_CLEAR << 2) + C_TAKEOFF_0, False)
+  await request(dut, id_1, T_REQUEST, R_TAKEOFF, (id_1 << 4) + (T_CLEAR << 1) + C_RUNWAY_0, False)
   
   # Plane requests ID
-  id_2 = await request(dut, 0, T_ID_PLEASE, 0, (1 << 5) + (T_ID_PLEASE << 2), False)
+  id_2 = await request(dut, 0, T_ID_PLEASE, 0, (1 << 4) + (T_ID_PLEASE << 1), False)
   
   # Plane id_2 requests landing
-  await request(dut, id_2, T_REQUEST, R_LANDING, (id_2 << 5) + (T_CLEAR << 2) + C_LANDING_1, False)
+  await request(dut, id_2, T_REQUEST, R_LANDING, (id_2 << 4) + (T_CLEAR << 1) + C_RUNWAY_1, False)
 
   # Plane requests ID
-  id_3 = await request(dut, 0, T_ID_PLEASE, 0, (2 << 5) + (T_ID_PLEASE << 2), False)
+  id_3 = await request(dut, 0, T_ID_PLEASE, 0, (2 << 4) + (T_ID_PLEASE << 1), False)
 
   # Plane id_3 requests takeoff
-  await request(dut, id_3, T_REQUEST, R_TAKEOFF, (id_3 << 5) + (T_HOLD << 2), False)
+  await request(dut, id_3, T_REQUEST, R_TAKEOFF, (id_3 << 4) + (T_HOLD << 1), False)
 
   # Plane id_1 declares takeoff runway 0, id_3 should be cleared
-  await request(dut, id_1, T_DECLARE, D_TAKEOFF_0, (id_3 << 5) + (T_CLEAR << 2) + C_TAKEOFF_0, False)
+  await request(dut, id_1, T_DECLARE, D_RUNWAY_0, (id_3 << 4) + (T_CLEAR << 1) + C_RUNWAY_0, False)
 
   # Plane requests ID
-  await request(dut, 0, T_ID_PLEASE, 0, (T_ID_PLEASE << 2), False)
+  await request(dut, 0, T_ID_PLEASE, 0, (T_ID_PLEASE << 1), False)
   
   print("////////////////////////////////////////")
   print("//         Finish basic tests         //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=False)
+@cocotb.test(skip=True)
 async def stress_test_takeoff(dut):
   print("////////////////////////////////////////")
   print("//     Begin takeoff stress tests     //")

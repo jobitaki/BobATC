@@ -2,17 +2,16 @@
 
 module BaudRateGenerator #(
     parameter int CLK_HZ      = 25_000_000,
-              int BAUD_RATE   = 9600,
-              int SAMPLE_RATE = 16
+              int BAUD_RATE   = 9600
 ) (
     input  logic clock,
-    reset,
+    input  logic reset,
     input  logic start_rx,
     input  logic start_tx,
     output logic tick
 );
 
-  parameter int DIVISOR = CLK_HZ / (BAUD_RATE * SAMPLE_RATE);
+  parameter int DIVISOR = CLK_HZ / BAUD_RATE;
 
   logic [$clog2(DIVISOR) + 1:0] clockCount;
 
