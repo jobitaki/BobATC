@@ -12,6 +12,7 @@ module BobTop (
     input  logic       clock,
     input  logic       reset,
     input  logic       rx,
+    input  logic [1:0] runway_override,
     output logic       tx,
     output logic       framing_error,
     output logic [1:0] runway_active,
@@ -25,7 +26,10 @@ module BobTop (
   logic uart_tx_ready;
   logic uart_tx_send;
 
-  UartRX receiver (
+  UartRX #(
+      .CLK_HZ(25_000_000),
+      .BAUD_RATE(115200)
+  ) receiver (
       .clock(clock),
       .reset(reset),
       .rx(rx),
@@ -35,7 +39,10 @@ module BobTop (
       .receiving(receiving)
   );
 
-  UartTX transmitter (
+  UartTX #(
+      .CLK_HZ(25_000_000),
+      .BAUD_RATE(115200)
+  ) transmitter (
       .clock(clock),
       .reset(reset),
       .send(uart_tx_send),
@@ -54,6 +61,7 @@ module BobTop (
       .uart_tx_ready(uart_tx_ready),
       .uart_tx_send(uart_tx_send),
       .runway_active(runway_active),
+      .runway_override(runway_override),
       .emergency(emergency)
   );
 
@@ -62,12 +70,13 @@ endmodule : BobTop
 module Bob (
     input  logic       clock,
     input  logic       reset,
-    input  logic [7:0] uart_rx_data,   // Data from UART
-    input  logic       uart_rx_valid,  // High if data is ready to be read
-    output logic [7:0] uart_tx_data,   // Data to write to UART
-    input  logic       uart_tx_ready,  // High if ready to write to UART
-    output logic       uart_tx_send,   // High if data is ready for transmit
-    output logic [1:0] runway_active,  // Tracks runway status
+    input  logic [7:0] uart_rx_data,     // Data from UART
+    input  logic       uart_rx_valid,    // High if data is ready to be read
+    input  logic [1:0] runway_override,
+    output logic [7:0] uart_tx_data,     // Data to write to UART
+    input  logic       uart_tx_ready,    // High if ready to write to UART
+    output logic       uart_tx_send,     // High if data is ready for transmit
+    output logic [1:0] runway_active,    // Tracks runway status
     output logic       emergency
 );
 
@@ -103,7 +112,7 @@ module Bob (
   logic reply_fifo_full, reply_fifo_empty;
 
   // For emergency latching
-  logic set_emergency, unset_emergency, emergency;
+  logic set_emergency, unset_emergency;
   logic [3:0] emergency_id;
 
   ///////////////////////////////
@@ -130,7 +139,7 @@ module Bob (
 
   FIFO #(
       .WIDTH(4),
-      .DEPTH(16)
+      .DEPTH(8)
   ) takeoff_fifo (
       .clock(clock),
       .reset(reset),
@@ -276,7 +285,8 @@ module Bob (
       .runway_id(runway_id),
       .lock(lock),
       .unlock(unlock),
-      .runway_active(runway_active)
+      .runway_active(runway_active),
+      .runway_override(runway_override)
   );
 
   always_ff @(posedge clock) begin
@@ -336,6 +346,7 @@ module ReadRequestFsm (
   msg_type_t       msg_type;
   logic      [1:0] msg_action;
   logic            takeoff_first;
+  logic            reverse_takeoff_first;
 
   assign plane_id   = uart_request.plane_id;
   assign msg_type   = uart_request.msg_type;
@@ -377,6 +388,7 @@ module ReadRequestFsm (
     release_id            = 1'b0;
     sel_takeoff_id_lock   = 1'b0;
     sel_diverted_id       = 1'b0;
+    reverse_takeoff_first = 1'b0;
     next_state            = QUIET;
 
     case (state)
@@ -514,9 +526,11 @@ module ReadRequestFsm (
             if (takeoff_first) begin
               next_state            = CLR_TAKEOFF;
               unqueue_takeoff_plane = 1'b1;
+              reverse_takeoff_first = 1'b1;
             end else begin
               next_state            = CLR_LANDING;
               unqueue_landing_plane = 1'b1;
+              reverse_takeoff_first = 1'b1;
             end
           end else if (!takeoff_fifo_empty) begin
             next_state            = CLR_TAKEOFF;
@@ -580,11 +594,14 @@ module ReadRequestFsm (
   always_ff @(posedge clock) begin
     if (reset) begin
       state         <= QUIET;
-      takeoff_first <= 1'b0;
     end else begin
       state         <= next_state;
-      takeoff_first <= ~takeoff_first;
     end
+  end
+
+  always_ff @(posedge clock) begin
+    if (reset) takeoff_first <= 1'b0;
+    else if (reverse_takeoff_first) takeoff_first <= ~takeoff_first;
   end
 
 endmodule : ReadRequestFsm
@@ -711,6 +728,7 @@ module RunwayManager (
     input  logic       runway_id,
     input  logic       lock,
     input  logic       unlock,
+    input  logic [1:0] runway_override,
     output logic [1:0] runway_active
 );
 
@@ -718,12 +736,12 @@ module RunwayManager (
   // Contains 4 bits of plane ID followed by runway status (1 for lock)
   runway_t [1:0] runway;
 
-  assign runway_active[0] = runway[0].active;
-  assign runway_active[1] = runway[1].active;
+  assign runway_active[0] = runway[0].active | runway_override[0];
+  assign runway_active[1] = runway[1].active | runway_override[1];
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      runway <= 0;
+      runway <= '0;
     end else begin
       if (lock && !unlock) begin
         if (runway_id) begin
@@ -736,9 +754,13 @@ module RunwayManager (
       end else if (!lock && unlock) begin
         if (runway_id) begin
           // Prevent other planes from unlocking runway
-          if (plane_id_unlock == runway[1].plane_id) runway[1].active <= 1'b0;
+          if (plane_id_unlock == runway[1].plane_id) begin
+            runway[1].active <= 1'b0;
+          end
         end else begin
-          if (plane_id_unlock == runway[0].plane_id) runway[0].active <= 1'b0;
+          if (plane_id_unlock == runway[0].plane_id) begin
+            runway[0].active <= 1'b0;
+          end
         end
       end
     end

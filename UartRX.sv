@@ -1,11 +1,14 @@
 `default_nettype none
 
-module UartRX (
+module UartRX #(
+    parameter int CLK_HZ    = 25_000_000,
+              int BAUD_RATE = 115200
+) (
     input  logic       clock,
     input  logic       reset,
-    input  logic       rx,            // Serial data input line
-    output logic [7:0] data,          // Data received
-    output logic       done,          // High if data is fully received
+    input  logic       rx,             // Serial data input line
+    output logic [7:0] data,           // Data received
+    output logic       done,           // High if data is fully received
     output logic       framing_error,
     output logic       receiving
 );
@@ -13,8 +16,8 @@ module UartRX (
   logic start, tick;
 
   BaudRateGenerator #(
-      .CLK_HZ(25_000_000),
-      .BAUD_RATE(9600)
+      .CLK_HZ(CLK_HZ),
+      .BAUD_RATE(BAUD_RATE)
   ) conductor (
       .clock(clock),
       .reset(reset),

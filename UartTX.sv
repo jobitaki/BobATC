@@ -1,20 +1,23 @@
 `default_nettype none
 
-module UartTX (
+module UartTX #(
+    parameter int CLK_HZ    = 25_000_000,
+              int BAUD_RATE = 115200
+) (
     input  logic       clock,
     input  logic       reset,
-    input  logic       send,   // High to send data
-    input  logic [7:0] data,   // Data to send
-    output logic       tx,     // Serial data output line
-    output logic       ready,  // High if TX is not busy
-    output logic       sending // High when sending a packet
+    input  logic       send,    // High to send data
+    input  logic [7:0] data,    // Data to send
+    output logic       tx,      // Serial data output line
+    output logic       ready,   // High if TX is not busy
+    output logic       sending  // High when sending a packet
 );
 
   logic start, tick;
 
   BaudRateGenerator #(
-      .CLK_HZ(25_000_000),
-      .BAUD_RATE(9600)
+      .CLK_HZ(CLK_HZ),
+      .BAUD_RATE(BAUD_RATE)
   ) conductor (
       .clock(clock),
       .reset(reset),

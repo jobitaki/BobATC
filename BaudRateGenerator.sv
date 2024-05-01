@@ -1,8 +1,8 @@
 `default_nettype none
 
 module BaudRateGenerator #(
-    parameter int CLK_HZ      = 25_000_000,
-              int BAUD_RATE   = 9600
+    parameter int CLK_HZ    = 25_000_000,
+              int BAUD_RATE = 115200
 ) (
     input  logic clock,
     input  logic reset,
