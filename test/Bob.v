@@ -4,6 +4,7 @@ module BobTop (
 	reset,
 	rx,
 	runway_override,
+	emergency_override,
 	tx,
 	framing_error,
 	runway_active,
@@ -15,6 +16,7 @@ module BobTop (
 	input wire reset;
 	input wire rx;
 	input wire [1:0] runway_override;
+	input wire emergency_override;
 	output wire tx;
 	output wire framing_error;
 	output wire [1:0] runway_active;
@@ -60,7 +62,8 @@ module BobTop (
 		.uart_tx_send(uart_tx_send),
 		.runway_active(runway_active),
 		.runway_override(runway_override),
-		.emergency(emergency)
+		.emergency_out(emergency),
+		.emergency_override(emergency_override)
 	);
 endmodule
 module Bob (
@@ -69,22 +72,24 @@ module Bob (
 	uart_rx_data,
 	uart_rx_valid,
 	runway_override,
+	emergency_override,
 	uart_tx_data,
 	uart_tx_ready,
 	uart_tx_send,
 	runway_active,
-	emergency
+	emergency_out
 );
 	input wire clock;
 	input wire reset;
 	input wire [7:0] uart_rx_data;
 	input wire uart_rx_valid;
 	input wire [1:0] runway_override;
+	input wire emergency_override;
 	output wire [7:0] uart_tx_data;
 	input wire uart_tx_ready;
 	output wire uart_tx_send;
 	output wire [1:0] runway_active;
-	output reg emergency;
+	output wire emergency_out;
 	wire [7:0] uart_request;
 	wire uart_rd_request;
 	wire uart_empty;
@@ -115,6 +120,7 @@ module Bob (
 	wire queue_reply;
 	wire reply_fifo_full;
 	wire reply_fifo_empty;
+	reg emergency;
 	wire set_emergency;
 	wire unset_emergency;
 	reg [3:0] emergency_id;
@@ -180,6 +186,7 @@ module Bob (
 		.full(id_full)
 	);
 	ReadRequestFsm fsm(
+		.emergency(emergency_out),
 		.clock(clock),
 		.reset(reset),
 		.uart_empty(uart_empty),
@@ -190,7 +197,6 @@ module Bob (
 		.landing_fifo_empty(landing_fifo_empty),
 		.reply_fifo_full(reply_fifo_full),
 		.runway_active(runway_active),
-		.emergency(emergency),
 		.all_id(all_id),
 		.id_full(id_full),
 		.emergency_id(emergency_id),
@@ -310,6 +316,7 @@ module Bob (
 		end
 		else if (unset_emergency)
 			emergency <= 1'b0;
+	assign emergency_out = emergency | emergency_override;
 endmodule
 module ReadRequestFsm (
 	clock,

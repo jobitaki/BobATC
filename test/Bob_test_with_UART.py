@@ -113,15 +113,17 @@ async def detect_uart_reply(dut, expected):
       print(f"Bob      : Plane {"{:02d}".format(reply >> 4)} cleared runway {reply & 0b1}")
     elif (reply & 0b00000001) == 0b1:
       print(f"Bob      : Plane {"{:02d}".format(reply >> 4)} cleared runway {reply & 0b1}")
-  if (reply & 0b00001110) == T_HOLD << 1:
+  elif (reply & 0b00001110) == T_HOLD << 1:
     print(f"Bob      : Plane {"{:02d}".format(reply >> 4)} hold")
-  if (reply & 0b00001110) == T_ID_PLEASE << 1:
+  elif (reply & 0b00001110) == T_ID_PLEASE << 1:
     if (reply & 0b00000001) == 0b0:
       print(f"Bob      : ID {reply >> 4} is available")
     elif (reply & 0b00000001) == 0b1:
       print(f"Bob      : My airspace is full")
-  if (reply & 0b00001110) == T_DIVERT << 1:
+  elif (reply & 0b00001110) == T_DIVERT << 1:
     print(f"Bob      : Plane {"{:02d}".format(reply >> 4)} divert due to congestion or emergency")
+  elif (reply & 0b00001110) == T_SAY_AGAIN << 1:
+    print(f"Bob      : Plane {"{:02d}".format(reply >> 4)} say again")
         
   return (reply == expected, reply >> 4)
 
@@ -159,7 +161,7 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     print("////////////////////////////////////////\n")
     return detect[1]
 
-@cocotb.test(skip=True)
+@cocotb.test(skip=False)
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
@@ -169,6 +171,7 @@ async def basic_test(dut):
   cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.runway_override.value = 0b00
+  dut.emergency_override.value = 0b0
   
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -203,7 +206,7 @@ async def basic_test(dut):
   print("//         Finish basic tests         //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=True)
+@cocotb.test(skip=False)
 async def stress_test_takeoff(dut):
   print("////////////////////////////////////////")
   print("//     Begin takeoff stress tests     //")
@@ -213,6 +216,7 @@ async def stress_test_takeoff(dut):
   cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.runway_override.value = 0b00
+  dut.emergency_override.value = 0b0
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -230,6 +234,14 @@ async def stress_test_takeoff(dut):
   for i in range(2):
     # Planes 00, 01 request takeoff, immediately cleared
     await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 4) + (T_CLEAR << 1) + i, False)
+
+  for i in range(2, 4):
+    # Planes 2, 3 declare landing, ignored
+    await request(dut, i, T_DECLARE, i % 2, 0, True)
+
+  for i in range(2, 4):
+    # Planes 2, 3 ID requested again
+    await request(dut, i, T_ID_PLEASE, 0, (i << 4) + (T_ID_PLEASE << 1), True)
 
   assert dut.runway_active.value == 0b11 
   assert dut.bobby.takeoff_fifo.empty.value
@@ -286,7 +298,7 @@ async def stress_test_takeoff(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=True)
+@cocotb.test(skip=False)
 async def stress_test_landing(dut):
   print("////////////////////////////////////////")
   print("//     Begin landing stress tests     //")
@@ -296,6 +308,7 @@ async def stress_test_landing(dut):
   cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.runway_override.value = 0b00
+  dut.emergency_override.value = 0b0
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -313,6 +326,14 @@ async def stress_test_landing(dut):
   for i in range(2):
     # Planes 00, 01 request landing, immediately cleared
     await request(dut, i, T_REQUEST, R_LANDING, (i << 4) + (T_CLEAR << 1) + i, False)
+  
+  for i in range(2, 4):
+    # Planes 2, 3 declare landing, ignored
+    await request(dut, i, T_DECLARE, i % 2, 0, True)
+  
+  for i in range(2, 4):
+    # Planes 2, 3 ID requested again
+    await request(dut, i, T_ID_PLEASE, 0, (i << 4) + (T_ID_PLEASE << 1), True)
 
   assert dut.runway_active.value == 0b11 
   assert dut.bobby.landing_fifo.empty.value
@@ -369,7 +390,7 @@ async def stress_test_landing(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=True)
+@cocotb.test(skip=False)
 async def stress_test_id(dut):
   print("////////////////////////////////////////")
   print("//        Begin ID stress tests       //")
@@ -379,6 +400,7 @@ async def stress_test_id(dut):
   cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.runway_override.value = 0b00
+  dut.emergency_override.value = 0b0
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -416,6 +438,7 @@ async def stress_test_alternate(dut):
   cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.runway_override.value = 0b01
+  dut.emergency_override.value = 0b0
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -493,6 +516,7 @@ async def emergency_test(dut):
   cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
 
   dut.runway_override.value = 0b00
+  dut.emergency_override.value = 0b0
 
   dut.reset.value = True
   await FallingEdge(dut.clock)
@@ -529,8 +553,12 @@ async def emergency_test(dut):
   assert dut.bobby.all_id.value == 0x03E1
 
   for i in range(6, 10):
-    # 4 planes get queued for landing
+    # 4 planes get queued for takeoff
     await request(dut, id[i], T_REQUEST, R_TAKEOFF, (id[i] << 4) + (T_HOLD << 1), False)
+  
+  await request(dut, id[5], T_DECLARE, D_RUNWAY_1, 0, True)
+
+  assert not dut.runway_active[1].value
   
   # Invalid resolving plane ID
   await request(dut, id[1], T_EMERGENCY, E_RESOLVE, 0, True)
@@ -539,15 +567,56 @@ async def emergency_test(dut):
 
   await request(dut, id[0], T_EMERGENCY, E_RESOLVE, 0, True)
   
-  assert not dut.bobby.emergency.value
+  assert not dut.emergency.value
+  assert not dut.bobby.all_id[0].value
 
+  await request(dut, id[6], T_EMERGENCY, E_DECLARE, 0, True)
+  await request(dut, id[7], T_EMERGENCY, E_DECLARE, 0, True)
+  # Invalid resolving plane ID
+  await request(dut, id[6], T_EMERGENCY, E_RESOLVE, 0, True)
+  assert dut.emergency.value
+  dut.emergency_override.value = 0b1
+  await request(dut, id[7], T_EMERGENCY, E_RESOLVE, 0, True)
+  assert dut.emergency.value
+  dut.emergency_override.value = 0b0
+  await FallingEdge(dut.clock)
+  await FallingEdge(dut.clock)
+  assert not dut.emergency.value
   print("////////////////////////////////////////")
   print("//       Finish emergency tests       //")
   print("////////////////////////////////////////\n")
+
+@cocotb.test(skip=False)
+async def say_again_test(dut):
+  print("////////////////////////////////////////")
+  print("//       Begin say again tests        //")
+  print("////////////////////////////////////////\n")
+
+  # Run the clock
+  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
+
+  dut.runway_override.value = 0b00
+  dut.emergency_override.value = 0b0
   
-@cocotb.test(skip=True)
-async def invalid_behavior_test(dut):
-  # Invalid aircraft tries to unlock runway
-  # Invalid aircraft tries to unlock emergency
+  dut.reset.value = True
+  await FallingEdge(dut.clock)
+  dut.reset.value = False
+  await FallingEdge(dut.clock)
+
+  # Plane requests ID
+  id_1 = await request(dut, 0, T_ID_PLEASE, 0, (T_ID_PLEASE << 1), False)
+
+  # Plane id_1 requests invalid 
+  await request(dut, id_1, T_CLEAR, C_RUNWAY_0, (id_1 << 4) + (T_SAY_AGAIN << 1), False)
+  await request(dut, id_1, T_CLEAR, C_RUNWAY_1, (id_1 << 4) + (T_SAY_AGAIN << 1), False)
+  await request(dut, id_1, T_HOLD, 0, (id_1 << 4) + (T_SAY_AGAIN << 1), False)
+  await request(dut, id_1, T_HOLD, 0, (id_1 << 4) + (T_SAY_AGAIN << 1), False)
+  await request(dut, id_1, T_DIVERT, 0, (id_1 << 4) + (T_SAY_AGAIN << 1), False)
+  await request(dut, id_1, T_DIVERT, 0, (id_1 << 4) + (T_SAY_AGAIN << 1), False)
   
-  return 0
+  assert dut.bobby.all_id[0].value
+  assert dut.bobby.runway_active.value == 0b00
+
+  print("////////////////////////////////////////")
+  print("//       Finish say again tests       //")
+  print("////////////////////////////////////////\n")
