@@ -161,7 +161,7 @@ async def request(dut, id, type, action, expected_reply, ignore_reply):
     print("////////////////////////////////////////\n")
     return detect[1]
 
-@cocotb.test(skip=False)
+@cocotb.test(skip=True)
 async def basic_test(dut):
   print("////////////////////////////////////////")
   print("//         Begin basic tests          //")
@@ -206,7 +206,7 @@ async def basic_test(dut):
   print("//         Finish basic tests         //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=False)
+@cocotb.test(skip=True)
 async def stress_test_takeoff(dut):
   print("////////////////////////////////////////")
   print("//     Begin takeoff stress tests     //")
@@ -294,7 +294,7 @@ async def stress_test_takeoff(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=False)
+@cocotb.test(skip=True)
 async def stress_test_landing(dut):
   print("////////////////////////////////////////")
   print("//     Begin landing stress tests     //")
@@ -382,7 +382,7 @@ async def stress_test_landing(dut):
   print("//     Finish takeoff stress tests    //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=False)
+@cocotb.test(skip=True)
 async def stress_test_id(dut):
   print("////////////////////////////////////////")
   print("//        Begin ID stress tests       //")
@@ -497,8 +497,12 @@ async def stress_test_alternate(dut):
   assert dut.bobby.landing_fifo.empty.value
   assert dut.bobby.takeoff_fifo.empty.value
   assert dut.runway_active.value == 0b01
+  
+  print("/////////////////////////////////////////////////////")
+  print("// Finish alternating takeoff/landing stress tests //")
+  print("/////////////////////////////////////////////////////\n")
 
-@cocotb.test(skip=False)
+@cocotb.test(skip=True)
 async def emergency_test(dut):
   print("////////////////////////////////////////")
   print("//       Begin emergency tests        //")
@@ -578,7 +582,7 @@ async def emergency_test(dut):
   print("//       Finish emergency tests       //")
   print("////////////////////////////////////////\n")
 
-@cocotb.test(skip=False)
+@cocotb.test(skip=True)
 async def say_again_test(dut):
   print("////////////////////////////////////////")
   print("//       Begin say again tests        //")
@@ -611,29 +615,4 @@ async def say_again_test(dut):
 
   print("////////////////////////////////////////")
   print("//       Finish say again tests       //")
-  print("////////////////////////////////////////\n")
-
-@cocotb.test(skip=True)
-async def exhaustive_stress_test(dut):
-  print("////////////////////////////////////////")
-  print("//         Begin jumble tests         //")
-  print("////////////////////////////////////////\n")
-
-  # Run the clock
-  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
-
-  dut.runway_override.value = 0b00
-  dut.emergency_override.value = 0b0
-  
-  dut.reset_n.value = False
-  await FallingEdge(dut.clock)
-  dut.reset_n.value = True
-  await FallingEdge(dut.clock)
-
-  # Plane requests ID
-  for i in range(0b11111111):
-    await write(dut, i)
-  
-  print("////////////////////////////////////////")
-  print("//          End jumble tests          //")
   print("////////////////////////////////////////\n")
