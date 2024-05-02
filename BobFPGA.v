@@ -3,26 +3,35 @@ module BobTop (
 	clock,
 	reset_n,
 	rx,
+	runway_override,
+	emergency_override,
 	tx,
 	framing_error,
 	runway_active,
+	emergency,
 	receiving,
-	ready
+	sending
 );
 	input wire clock;
 	input wire reset_n;
 	input wire rx;
+	input wire [1:0] runway_override;
+	input wire emergency_override;
 	output wire tx;
 	output wire framing_error;
 	output wire [1:0] runway_active;
+	output wire emergency;
 	output wire receiving;
-	output wire ready;
+	output wire sending;
 	wire [7:0] uart_rx_data;
 	wire [7:0] uart_tx_data;
 	wire uart_rx_valid;
 	wire uart_tx_ready;
 	wire uart_tx_send;
-	UartRX receiver(
+	UartRX #(
+		.CLK_HZ(25000000),
+		.BAUD_RATE(115200)
+	) receiver(
 		.clock(clock),
 		.reset(~reset_n),
 		.rx(rx),
@@ -31,14 +40,28 @@ module BobTop (
 		.framing_error(framing_error),
 		.receiving(receiving)
 	);
-	UartTX transmitter(
+	UartTX #(
+		.CLK_HZ(25000000),
+		.BAUD_RATE(115200)
+	) transmitter(
 		.clock(clock),
 		.reset(~reset_n),
 		.send(uart_tx_send),
 		.data(uart_tx_data),
 		.tx(tx),
-		.ready(uart_tx_ready)
+		.ready(uart_tx_ready),
+		.sending(sending)
 	);
+	reg [1:0] ro_temp;
+	reg [1:0] ro_sync;
+	reg eo_temp;
+	reg eo_sync;
+	always @(posedge clock) begin
+		ro_temp <= runway_override;
+		eo_temp <= emergency_override;
+		ro_sync <= ro_temp;
+		eo_sync <= eo_temp;
+	end
 	Bob bobby(
 		.clock(clock),
 		.reset(~reset_n),
@@ -47,7 +70,10 @@ module BobTop (
 		.uart_tx_data(uart_tx_data),
 		.uart_tx_ready(uart_tx_ready),
 		.uart_tx_send(uart_tx_send),
-		.runway_active(runway_active)
+		.runway_active(runway_active),
+		.runway_override(ro_sync),
+		.emergency_out(emergency),
+		.emergency_override(eo_sync)
 	);
 endmodule
 module Bob (
@@ -55,19 +81,25 @@ module Bob (
 	reset,
 	uart_rx_data,
 	uart_rx_valid,
+	runway_override,
+	emergency_override,
 	uart_tx_data,
 	uart_tx_ready,
 	uart_tx_send,
-	runway_active
+	runway_active,
+	emergency_out
 );
 	input wire clock;
 	input wire reset;
 	input wire [7:0] uart_rx_data;
 	input wire uart_rx_valid;
+	input wire [1:0] runway_override;
+	input wire emergency_override;
 	output wire [7:0] uart_tx_data;
 	input wire uart_tx_ready;
 	output wire uart_tx_send;
 	output wire [1:0] runway_active;
+	output wire emergency_out;
 	wire [7:0] uart_request;
 	wire uart_rd_request;
 	wire uart_empty;
@@ -76,6 +108,7 @@ module Bob (
 	wire unlock;
 	reg [3:0] cleared_id_to_lock;
 	wire sel_takeoff_id_lock;
+	wire [9:0] runway;
 	wire queue_takeoff_plane;
 	wire unqueue_takeoff_plane;
 	wire [3:0] cleared_takeoff_id;
@@ -98,9 +131,9 @@ module Bob (
 	wire queue_reply;
 	wire reply_fifo_full;
 	wire reply_fifo_empty;
+	reg emergency;
 	wire set_emergency;
 	wire unset_emergency;
-	reg emergency;
 	reg [3:0] emergency_id;
 	FIFO #(
 		.WIDTH(8),
@@ -117,7 +150,7 @@ module Bob (
 	);
 	FIFO #(
 		.WIDTH(4),
-		.DEPTH(16)
+		.DEPTH(8)
 	) takeoff_fifo(
 		.clock(clock),
 		.reset(reset),
@@ -164,6 +197,7 @@ module Bob (
 		.full(id_full)
 	);
 	ReadRequestFsm fsm(
+		.emergency(emergency_out),
 		.clock(clock),
 		.reset(reset),
 		.uart_empty(uart_empty),
@@ -174,10 +208,10 @@ module Bob (
 		.landing_fifo_empty(landing_fifo_empty),
 		.reply_fifo_full(reply_fifo_full),
 		.runway_active(runway_active),
-		.emergency(emergency),
 		.all_id(all_id),
 		.id_full(id_full),
 		.emergency_id(emergency_id),
+		.runway(runway),
 		.uart_rd_request(uart_rd_request),
 		.queue_takeoff_plane(queue_takeoff_plane),
 		.queue_landing_plane(queue_landing_plane),
@@ -280,7 +314,9 @@ module Bob (
 		.runway_id(runway_id),
 		.lock(lock),
 		.unlock(unlock),
-		.runway_active(runway_active)
+		.runway_active(runway_active),
+		.runway_override(runway_override),
+		.runway(runway)
 	);
 	always @(posedge clock)
 		if (reset) begin
@@ -293,6 +329,7 @@ module Bob (
 		end
 		else if (unset_emergency)
 			emergency <= 1'b0;
+	assign emergency_out = emergency | emergency_override;
 endmodule
 module ReadRequestFsm (
 	clock,
@@ -309,6 +346,7 @@ module ReadRequestFsm (
 	all_id,
 	id_full,
 	emergency_id,
+	runway,
 	uart_rd_request,
 	queue_takeoff_plane,
 	queue_landing_plane,
@@ -346,6 +384,7 @@ module ReadRequestFsm (
 	input wire [15:0] all_id;
 	input wire id_full;
 	input wire [3:0] emergency_id;
+	input wire [9:0] runway;
 	output reg uart_rd_request;
 	output reg queue_takeoff_plane;
 	output reg queue_landing_plane;
@@ -372,6 +411,7 @@ module ReadRequestFsm (
 	wire [2:0] msg_type;
 	wire [1:0] msg_action;
 	reg takeoff_first;
+	reg reverse_takeoff_first;
 	assign plane_id = uart_request[7-:4];
 	assign msg_type = uart_request[3-:3];
 	assign msg_action = uart_request[0];
@@ -400,6 +440,7 @@ module ReadRequestFsm (
 		release_id = 1'b0;
 		sel_takeoff_id_lock = 1'b0;
 		sel_diverted_id = 1'b0;
+		reverse_takeoff_first = 1'b0;
 		next_state = 3'b000;
 		case (state)
 			3'b000:
@@ -472,12 +513,15 @@ module ReadRequestFsm (
 				else if (msg_type == 3'b001) begin
 					if (all_id[plane_id]) begin
 						next_state = 3'b011;
-						release_id = 1'b1;
 						if (!msg_action) begin
+							if ((runway[4-:4] == plane_id) && runway[0])
+								release_id = 1'b1;
 							unlock = 1'b1;
 							runway_id = 1'b0;
 						end
 						else if (msg_action) begin
+							if ((runway[9-:4] == plane_id) && runway[5])
+								release_id = 1'b1;
 							unlock = 1'b1;
 							runway_id = 1'b1;
 						end
@@ -536,10 +580,12 @@ module ReadRequestFsm (
 						if (takeoff_first) begin
 							next_state = 3'b100;
 							unqueue_takeoff_plane = 1'b1;
+							reverse_takeoff_first = 1'b1;
 						end
 						else begin
 							next_state = 3'b101;
 							unqueue_landing_plane = 1'b1;
+							reverse_takeoff_first = 1'b1;
 						end
 					end
 					else if (!takeoff_fifo_empty) begin
@@ -596,14 +642,15 @@ module ReadRequestFsm (
 		endcase
 	end
 	always @(posedge clock)
-		if (reset) begin
+		if (reset)
 			state <= 3'b000;
-			takeoff_first <= 1'b0;
-		end
-		else begin
+		else
 			state <= next_state;
+	always @(posedge clock)
+		if (reset)
+			takeoff_first <= 1'b0;
+		else if (reverse_takeoff_first)
 			takeoff_first <= ~takeoff_first;
-		end
 endmodule
 module SendReplyFsm (
 	clock,
@@ -703,7 +750,9 @@ module RunwayManager (
 	runway_id,
 	lock,
 	unlock,
-	runway_active
+	runway_override,
+	runway_active,
+	runway
 );
 	input wire clock;
 	input wire reset;
@@ -712,13 +761,14 @@ module RunwayManager (
 	input wire runway_id;
 	input wire lock;
 	input wire unlock;
+	input wire [1:0] runway_override;
 	output wire [1:0] runway_active;
-	reg [9:0] runway;
-	assign runway_active[0] = runway[0];
-	assign runway_active[1] = runway[5];
+	output reg [9:0] runway;
+	assign runway_active[0] = runway[0] | runway_override[0];
+	assign runway_active[1] = runway[5] | runway_override[1];
 	always @(posedge clock)
 		if (reset)
-			runway <= 0;
+			runway <= 1'sb0;
 		else if (lock && !unlock) begin
 			if (runway_id) begin
 				runway[9-:4] <= plane_id_lock;
@@ -801,6 +851,8 @@ module UartRX (
 	framing_error,
 	receiving
 );
+	parameter signed [31:0] CLK_HZ = 25000000;
+	parameter signed [31:0] BAUD_RATE = 115200;
 	input wire clock;
 	input wire reset;
 	input wire rx;
@@ -811,8 +863,8 @@ module UartRX (
 	wire start;
 	wire tick;
 	BaudRateGenerator #(
-		.CLK_HZ(25000000),
-		.BAUD_RATE(9600)
+		.CLK_HZ(CLK_HZ),
+		.BAUD_RATE(BAUD_RATE)
 	) conductor(
 		.clock(clock),
 		.reset(reset),
@@ -951,19 +1003,23 @@ module UartTX (
 	send,
 	data,
 	tx,
-	ready
+	ready,
+	sending
 );
+	parameter signed [31:0] CLK_HZ = 25000000;
+	parameter signed [31:0] BAUD_RATE = 115200;
 	input wire clock;
 	input wire reset;
 	input wire send;
 	input wire [7:0] data;
 	output reg tx;
 	output wire ready;
+	output wire sending;
 	wire start;
 	wire tick;
 	BaudRateGenerator #(
-		.CLK_HZ(25000000),
-		.BAUD_RATE(9600)
+		.CLK_HZ(CLK_HZ),
+		.BAUD_RATE(BAUD_RATE)
 	) conductor(
 		.clock(clock),
 		.reset(reset),
@@ -1021,7 +1077,8 @@ module UartTX (
 		.send_stop_bit(send_stop_bit),
 		.en_data_counter(en_data_counter),
 		.clear_data_counter(clear_data_counter),
-		.ready(ready)
+		.ready(ready),
+		.sending(sending)
 	);
 endmodule
 module UartTXFsm (
@@ -1036,7 +1093,8 @@ module UartTXFsm (
 	send_stop_bit,
 	en_data_counter,
 	clear_data_counter,
-	ready
+	ready,
+	sending
 );
 	input wire clock;
 	input wire reset;
@@ -1050,6 +1108,7 @@ module UartTXFsm (
 	output reg en_data_counter;
 	output reg clear_data_counter;
 	output reg ready;
+	output reg sending;
 	reg [1:0] state;
 	reg [1:0] next_state;
 	always @(*) begin
@@ -1060,6 +1119,7 @@ module UartTXFsm (
 		en_data_counter = 1'b0;
 		clear_data_counter = 1'b0;
 		ready = 1'b0;
+		sending = 1'b0;
 		next_state = 2'd0;
 		case (state)
 			2'd0:
@@ -1072,7 +1132,7 @@ module UartTXFsm (
 					next_state = 2'd0;
 					ready = 1'b1;
 				end
-			2'd1:
+			2'd1: begin
 				if (tick) begin
 					next_state = 2'd2;
 					send_data = 1'b1;
@@ -1082,7 +1142,9 @@ module UartTXFsm (
 					next_state = 2'd1;
 					send_start_bit = 1'b1;
 				end
-			2'd2:
+				sending = 1'b1;
+			end
+			2'd2: begin
 				if (tick && done_data) begin
 					next_state = 2'd3;
 					send_stop_bit = 1'b1;
@@ -1093,7 +1155,9 @@ module UartTXFsm (
 					send_data = 1'b1;
 					en_data_counter = 1'b1;
 				end
-			2'd3:
+				sending = 1'b1;
+			end
+			2'd3: begin
 				if (tick) begin
 					next_state = 2'd0;
 					ready = 1'b1;
@@ -1102,6 +1166,8 @@ module UartTXFsm (
 					next_state = 2'd3;
 					send_stop_bit = 1'b1;
 				end
+				sending = 1'b1;
+			end
 			default: next_state = 2'd0;
 		endcase
 	end
@@ -1120,7 +1186,7 @@ module BaudRateGenerator (
 	tick
 );
 	parameter signed [31:0] CLK_HZ = 25000000;
-	parameter signed [31:0] BAUD_RATE = 9600;
+	parameter signed [31:0] BAUD_RATE = 115200;
 	input wire clock;
 	input wire reset;
 	input wire start_rx;

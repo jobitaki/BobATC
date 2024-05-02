@@ -52,6 +52,16 @@ module BobTop (
 		.ready(uart_tx_ready),
 		.sending(sending)
 	);
+	reg [1:0] ro_temp;
+	reg [1:0] ro_sync;
+	reg eo_temp;
+	reg eo_sync;
+	always @(posedge clock) begin
+		ro_temp <= runway_override;
+		eo_temp <= emergency_override;
+		ro_sync <= ro_temp;
+		eo_sync <= eo_temp;
+	end
 	Bob bobby(
 		.clock(clock),
 		.reset(reset),
@@ -61,9 +71,9 @@ module BobTop (
 		.uart_tx_ready(uart_tx_ready),
 		.uart_tx_send(uart_tx_send),
 		.runway_active(runway_active),
-		.runway_override(runway_override),
+		.runway_override(ro_sync),
 		.emergency_out(emergency),
-		.emergency_override(emergency_override)
+		.emergency_override(eo_sync)
 	);
 endmodule
 module Bob (
@@ -98,6 +108,7 @@ module Bob (
 	wire unlock;
 	reg [3:0] cleared_id_to_lock;
 	wire sel_takeoff_id_lock;
+	wire [9:0] runway;
 	wire queue_takeoff_plane;
 	wire unqueue_takeoff_plane;
 	wire [3:0] cleared_takeoff_id;
@@ -200,6 +211,7 @@ module Bob (
 		.all_id(all_id),
 		.id_full(id_full),
 		.emergency_id(emergency_id),
+		.runway(runway),
 		.uart_rd_request(uart_rd_request),
 		.queue_takeoff_plane(queue_takeoff_plane),
 		.queue_landing_plane(queue_landing_plane),
@@ -303,7 +315,8 @@ module Bob (
 		.lock(lock),
 		.unlock(unlock),
 		.runway_active(runway_active),
-		.runway_override(runway_override)
+		.runway_override(runway_override),
+		.runway(runway)
 	);
 	always @(posedge clock)
 		if (reset) begin
@@ -333,6 +346,7 @@ module ReadRequestFsm (
 	all_id,
 	id_full,
 	emergency_id,
+	runway,
 	uart_rd_request,
 	queue_takeoff_plane,
 	queue_landing_plane,
@@ -370,6 +384,7 @@ module ReadRequestFsm (
 	input wire [15:0] all_id;
 	input wire id_full;
 	input wire [3:0] emergency_id;
+	input wire [9:0] runway;
 	output reg uart_rd_request;
 	output reg queue_takeoff_plane;
 	output reg queue_landing_plane;
@@ -498,12 +513,15 @@ module ReadRequestFsm (
 				else if (msg_type == 3'b001) begin
 					if (all_id[plane_id]) begin
 						next_state = 3'b011;
-						release_id = 1'b1;
 						if (!msg_action) begin
+							if ((runway[4-:4] == plane_id) && runway[0])
+								release_id = 1'b1;
 							unlock = 1'b1;
 							runway_id = 1'b0;
 						end
 						else if (msg_action) begin
+							if ((runway[9-:4] == plane_id) && runway[5])
+								release_id = 1'b1;
 							unlock = 1'b1;
 							runway_id = 1'b1;
 						end
@@ -733,7 +751,8 @@ module RunwayManager (
 	lock,
 	unlock,
 	runway_override,
-	runway_active
+	runway_active,
+	runway
 );
 	input wire clock;
 	input wire reset;
@@ -744,7 +763,7 @@ module RunwayManager (
 	input wire unlock;
 	input wire [1:0] runway_override;
 	output wire [1:0] runway_active;
-	reg [9:0] runway;
+	output reg [9:0] runway;
 	assign runway_active[0] = runway[0] | runway_override[0];
 	assign runway_active[1] = runway[5] | runway_override[1];
 	always @(posedge clock)

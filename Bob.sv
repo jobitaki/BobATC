@@ -13,6 +13,7 @@ module BobTop (
     input  logic       reset,
     input  logic       rx,
     input  logic [1:0] runway_override,
+    input  logic       emergency_override,
     output logic       tx,
     output logic       framing_error,
     output logic [1:0] runway_active,
@@ -52,6 +53,15 @@ module BobTop (
       .sending(sending)
   );
 
+  logic [1:0] ro_temp, ro_sync;
+  logic eo_temp, eo_sync;
+  always_ff @(posedge clock) begin
+    ro_temp <= runway_override;
+    eo_temp <= emergency_override;
+    ro_sync <= ro_temp;
+    eo_sync <= eo_temp;
+  end
+
   Bob bobby (
       .clock(clock),
       .reset(reset),
@@ -61,8 +71,9 @@ module BobTop (
       .uart_tx_ready(uart_tx_ready),
       .uart_tx_send(uart_tx_send),
       .runway_active(runway_active),
-      .runway_override(runway_override),
-      .emergency(emergency)
+      .runway_override(ro_sync),
+      .emergency_out(emergency),
+      .emergency_override(eo_sync)
   );
 
 endmodule : BobTop
@@ -70,14 +81,15 @@ endmodule : BobTop
 module Bob (
     input  logic       clock,
     input  logic       reset,
-    input  logic [7:0] uart_rx_data,     // Data from UART
-    input  logic       uart_rx_valid,    // High if data is ready to be read
+    input  logic [7:0] uart_rx_data,        // Data from UART
+    input  logic       uart_rx_valid,       // High if data is ready to be read
     input  logic [1:0] runway_override,
-    output logic [7:0] uart_tx_data,     // Data to write to UART
-    input  logic       uart_tx_ready,    // High if ready to write to UART
-    output logic       uart_tx_send,     // High if data is ready for transmit
-    output logic [1:0] runway_active,    // Tracks runway status
-    output logic       emergency
+    input  logic       emergency_override,
+    output logic [7:0] uart_tx_data,        // Data to write to UART
+    input  logic       uart_tx_ready,       // High if ready to write to UART
+    output logic       uart_tx_send,        // High if data is ready for transmit
+    output logic [1:0] runway_active,       // Tracks runway status
+    output logic       emergency_out
 );
 
   // For UART Request Storage FIFO
@@ -90,6 +102,7 @@ module Bob (
   logic lock, unlock;
   logic [3:0] cleared_id_to_lock;
   logic sel_takeoff_id_lock;
+  runway_t [1:0] runway;
 
   // For Aircraft Takeoff FIFO
   logic queue_takeoff_plane, unqueue_takeoff_plane;
@@ -112,6 +125,7 @@ module Bob (
   logic reply_fifo_full, reply_fifo_empty;
 
   // For emergency latching
+  logic emergency;
   logic set_emergency, unset_emergency;
   logic [3:0] emergency_id;
 
@@ -198,7 +212,10 @@ module Bob (
   // FSM //
   /////////
 
-  ReadRequestFsm fsm (.*);
+  ReadRequestFsm fsm (
+      .emergency(emergency_out),
+      .*
+  );
 
   /////////////////////
   // Reply Generator //
@@ -286,7 +303,8 @@ module Bob (
       .lock(lock),
       .unlock(unlock),
       .runway_active(runway_active),
-      .runway_override(runway_override)
+      .runway_override(runway_override),
+      .runway(runway)
   );
 
   always_ff @(posedge clock) begin
@@ -301,45 +319,48 @@ module Bob (
     end
   end
 
+  assign emergency_out = emergency | emergency_override;
+
 endmodule : Bob
 
 module ReadRequestFsm (
-    input  logic        clock,
-    input  logic        reset,
-    input  logic        uart_empty,
-    input  msg_t        uart_request,
-    input  logic        takeoff_fifo_full,
-    input  logic        landing_fifo_full,
-    input  logic        takeoff_fifo_empty,
-    input  logic        landing_fifo_empty,
-    input  logic        reply_fifo_full,
-    input  logic [ 1:0] runway_active,
-    input  logic        emergency,
-    input  logic [15:0] all_id,
-    input  logic        id_full,
-    input  logic [ 3:0] emergency_id,
-    output logic        uart_rd_request,
-    output logic        queue_takeoff_plane,
-    output logic        queue_landing_plane,
-    output logic        unqueue_takeoff_plane,
-    output logic        unqueue_landing_plane,
-    output logic [ 1:0] send_clear,
-    output logic        send_hold,
-    output logic        send_say_ag,
-    output logic        send_divert,
-    output logic        send_divert_landing,
-    output logic        send_invalid_id,
-    output logic        send_valid_id,
-    output logic        queue_reply,
-    output logic        lock,
-    output logic        unlock,
-    output logic        runway_id,
-    output logic        set_emergency,
-    output logic        unset_emergency,
-    output logic        take_id,
-    output logic        release_id,
-    output logic        sel_takeoff_id_lock,
-    output logic        sel_diverted_id
+    input  logic           clock,
+    input  logic           reset,
+    input  logic           uart_empty,
+    input  msg_t           uart_request,
+    input  logic           takeoff_fifo_full,
+    input  logic           landing_fifo_full,
+    input  logic           takeoff_fifo_empty,
+    input  logic           landing_fifo_empty,
+    input  logic           reply_fifo_full,
+    input  logic    [ 1:0] runway_active,
+    input  logic           emergency,
+    input  logic    [15:0] all_id,
+    input  logic           id_full,
+    input  logic    [ 3:0] emergency_id,
+    input  runway_t [ 1:0] runway,
+    output logic           uart_rd_request,
+    output logic           queue_takeoff_plane,
+    output logic           queue_landing_plane,
+    output logic           unqueue_takeoff_plane,
+    output logic           unqueue_landing_plane,
+    output logic    [ 1:0] send_clear,
+    output logic           send_hold,
+    output logic           send_say_ag,
+    output logic           send_divert,
+    output logic           send_divert_landing,
+    output logic           send_invalid_id,
+    output logic           send_valid_id,
+    output logic           queue_reply,
+    output logic           lock,
+    output logic           unlock,
+    output logic           runway_id,
+    output logic           set_emergency,
+    output logic           unset_emergency,
+    output logic           take_id,
+    output logic           release_id,
+    output logic           sel_takeoff_id_lock,
+    output logic           sel_diverted_id
 );
 
   logic      [3:0] plane_id;
@@ -455,14 +476,15 @@ module ReadRequestFsm (
         end else if (msg_type == T_DECLARE) begin  // DECLARE
           if (all_id[plane_id]) begin
             next_state = CHECK_QUEUES;
-            release_id = 1'b1;  // Release ID
             // Declaring either takeoff or landing, no distinction in action
             if (!msg_action) begin
               // Runway 0
+              if (runway[0].plane_id == plane_id && runway[0].active) release_id = 1'b1;
               unlock    = 1'b1;
               runway_id = 1'b0;
             end else if (msg_action) begin
               // Runway 1
+              if (runway[1].plane_id == plane_id && runway[1].active) release_id = 1'b1;
               unlock    = 1'b1;
               runway_id = 1'b1;
             end
@@ -593,9 +615,9 @@ module ReadRequestFsm (
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      state         <= QUIET;
+      state <= QUIET;
     end else begin
-      state         <= next_state;
+      state <= next_state;
     end
   end
 
@@ -673,7 +695,7 @@ module FIFO #(
     input  logic             re,
     output logic [WIDTH-1:0] data_out,
     output logic             full,
-    empty
+    output logic             empty
 );
 
   logic [DEPTH-1:0][WIDTH-1:0] queue;
@@ -721,20 +743,20 @@ endmodule : FIFO
 //      will be unlocked only if the plane_id on the input is equal.
 //
 module RunwayManager (
-    input  logic       clock,
-    input  logic       reset,
-    input  logic [3:0] plane_id_unlock,
-    input  logic [3:0] plane_id_lock,
-    input  logic       runway_id,
-    input  logic       lock,
-    input  logic       unlock,
-    input  logic [1:0] runway_override,
-    output logic [1:0] runway_active
+    input  logic          clock,
+    input  logic          reset,
+    input  logic    [3:0] plane_id_unlock,
+    input  logic    [3:0] plane_id_lock,
+    input  logic          runway_id,
+    input  logic          lock,
+    input  logic          unlock,
+    input  logic    [1:0] runway_override,
+    output logic    [1:0] runway_active,
+    output runway_t [1:0] runway
 );
 
   // Register that contain the current status of each runway
   // Contains 4 bits of plane ID followed by runway status (1 for lock)
-  runway_t [1:0] runway;
 
   assign runway_active[0] = runway[0].active | runway_override[0];
   assign runway_active[1] = runway[1].active | runway_override[1];

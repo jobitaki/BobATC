@@ -3,7 +3,7 @@ from cocotb.triggers import *
 from cocotb.clock import Clock
 from cocotb.utils import get_sim_time
 
-T_REQUEST    = 0b000
+T_REQUEST    = 0b000 
 T_DECLARE    = 0b001
 T_EMERGENCY  = 0b010
 T_CLEAR      = 0b011
@@ -236,12 +236,8 @@ async def stress_test_takeoff(dut):
     await request(dut, i, T_REQUEST, R_TAKEOFF, (i << 4) + (T_CLEAR << 1) + i, False)
 
   for i in range(2, 4):
-    # Planes 2, 3 declare landing, ignored
+    # Planes 2, 3 declare landing, ignored, they keep their IDs
     await request(dut, i, T_DECLARE, i % 2, 0, True)
-
-  for i in range(2, 4):
-    # Planes 2, 3 ID requested again
-    await request(dut, i, T_ID_PLEASE, 0, (i << 4) + (T_ID_PLEASE << 1), True)
 
   assert dut.runway_active.value == 0b11 
   assert dut.bobby.takeoff_fifo.empty.value
@@ -328,13 +324,9 @@ async def stress_test_landing(dut):
     await request(dut, i, T_REQUEST, R_LANDING, (i << 4) + (T_CLEAR << 1) + i, False)
   
   for i in range(2, 4):
-    # Planes 2, 3 declare landing, ignored
+    # Planes 2, 3 declare landing, ignored, they keep their IDs
     await request(dut, i, T_DECLARE, i % 2, 0, True)
   
-  for i in range(2, 4):
-    # Planes 2, 3 ID requested again
-    await request(dut, i, T_ID_PLEASE, 0, (i << 4) + (T_ID_PLEASE << 1), True)
-
   assert dut.runway_active.value == 0b11 
   assert dut.bobby.landing_fifo.empty.value
 
@@ -619,4 +611,29 @@ async def say_again_test(dut):
 
   print("////////////////////////////////////////")
   print("//       Finish say again tests       //")
+  print("////////////////////////////////////////\n")
+
+@cocotb.test(skip=True)
+async def exhaustive_stress_test(dut):
+  print("////////////////////////////////////////")
+  print("//         Begin jumble tests         //")
+  print("////////////////////////////////////////\n")
+
+  # Run the clock
+  cocotb.start_soon(Clock(dut.clock, CLOCK_PERIOD, units="ns").start())
+
+  dut.runway_override.value = 0b00
+  dut.emergency_override.value = 0b0
+  
+  dut.reset_n.value = False
+  await FallingEdge(dut.clock)
+  dut.reset_n.value = True
+  await FallingEdge(dut.clock)
+
+  # Plane requests ID
+  for i in range(0b11111111):
+    await write(dut, i)
+  
+  print("////////////////////////////////////////")
+  print("//          End jumble tests          //")
   print("////////////////////////////////////////\n")
